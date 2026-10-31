@@ -5,7 +5,7 @@ import rcheevos
 public struct Console: Equatable, Sendable {
     public let id: Int
     public let folders: [String]
-    /// RetroArch cores without the `_libretro.dylib` suffix, default first.
+    /// RetroArch cores without the `_libretro.<ext>` suffix, default first.
     public let cores: [String]
     public var name: String { String(cString: rc_console_name(UInt32(id))) }
 }
@@ -90,11 +90,10 @@ public enum Consoles {
         return all.first { $0.folders.contains(name) }
     }
 
-    /// Every console listing this core. Accepts a full path or a bare `x_libretro.dylib` name.
+    /// Every console listing this core. Accepts a full path or a bare `x_libretro.dylib` (`.so`, `.dll`) name.
     public static func forCore(file: String) -> [Console] {
-        let core = URL(fileURLWithPath: file).lastPathComponent
-            .replacingOccurrences(of: "_libretro.dylib", with: "")
-            .replacingOccurrences(of: ".dylib", with: "")
+        let name = ((file.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent as NSString).deletingPathExtension
+        let core = name.hasSuffix("_libretro") ? String(name.dropLast("_libretro".count)) : name
         return all.filter { $0.cores.contains(core) }
     }
 

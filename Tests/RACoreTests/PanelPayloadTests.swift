@@ -71,7 +71,7 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     let none = PanelBuilder.failed(cached: nil, savedAt: nil)
     #expect(none.state == "error")
     #expect(none.message == "Couldn't reach RetroAchievements.")
-    #expect(PanelBuilder.signedOut().message == "Open Steam RetroAchievements to sign in.")
+    #expect(PanelBuilder.signedOut().message == "Sign in to RetroAchievements to see your achievements here.")
     #expect(PanelBuilder.notMatched(consoleId: 7, verification: .unchecked).message == "Couldn't find this game on RetroAchievements.")
     #expect(PanelBuilder.hidden().state == "hidden")
 }

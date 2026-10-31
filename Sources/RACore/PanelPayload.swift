@@ -75,7 +75,7 @@ public enum PanelBuilder {
         return out
     }
 
-    public static func signedOut() -> PanelPayload { .init(state: "signedOut", message: "Open Steam RetroAchievements to sign in.") }
+    public static func signedOut() -> PanelPayload { .init(state: "signedOut", message: "Sign in to RetroAchievements to see your achievements here.") }
     public static func hidden() -> PanelPayload { .init(state: "hidden") }
 
     public static func notMatched(consoleId: Int?, verification: Verification) -> PanelPayload {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The RetroAchievements emulators that have a macOS build and load ROM files.
+/// The RetroAchievements emulators that load ROM files and run on macOS, Linux and Windows.
 public enum Emulator: String, Codable, CaseIterable, Sendable {
     case retroarch, duckstation, pcsx2, ppsspp, dolphin, flycast, skyemu
 
@@ -20,6 +20,32 @@ public enum Emulator: String, Codable, CaseIterable, Sendable {
         switch self {
         case .ppsspp: ["PPSSPPSDL", "PPSSPP"]
         default: [displayName]
+        }
+    }
+
+    /// Executable names on Linux, then Windows (without `.exe`).
+    public var binaryNames: [String] {
+        switch self {
+        case .retroarch: ["retroarch"]
+        case .duckstation: ["duckstation-qt", "duckstation-qt-x64-ReleaseLTCG"]
+        case .pcsx2: ["pcsx2-qt"]
+        case .ppsspp: ["PPSSPPSDL", "PPSSPPWindows64"]
+        case .dolphin: ["dolphin-emu", "Dolphin"]
+        case .flycast: ["flycast"]
+        case .skyemu: ["SkyEmu"]
+        }
+    }
+
+    /// The Flathub app id: how Steam Deck and many Linux desktops install emulators.
+    public var flatpakID: String? {
+        switch self {
+        case .retroarch: "org.libretro.RetroArch"
+        case .duckstation: "org.duckstation.DuckStation"
+        case .pcsx2: "net.pcsx2.PCSX2"
+        case .ppsspp: "org.ppsspp.PPSSPP"
+        case .dolphin: "org.DolphinEmu.dolphin-emu"
+        case .flycast: "org.flycast.Flycast"
+        case .skyemu: nil
         }
     }
 
@@ -59,9 +85,15 @@ public struct EmulatorLaunch: Equatable, Sendable {
     static let flagsWithValue: Set<String> = ["-L", "--libretro", "-c", "--config", "--appendconfig", "-s", "--save",
                                               "-S", "--savestate", "--subsystem", "--log-file", "-a", "-e", "--exec"]
 
+    #if os(Windows)
+    public static let backslashEscapes = false  // backslashes are path separators there
+    #else
+    public static let backslashEscapes = true
+    #endif
+
     /// nil when the shortcut doesn't launch a supported emulator.
-    public static func parse(exe: String, launchOptions: String) -> EmulatorLaunch? {
-        parse(exePath: tokenize(exe).first ?? exe, args: tokenize(launchOptions))
+    public static func parse(exe: String, launchOptions: String, backslashEscapes: Bool = EmulatorLaunch.backslashEscapes) -> EmulatorLaunch? {
+        parse(exePath: tokenize(exe, backslashEscapes: backslashEscapes).first ?? exe, args: tokenize(launchOptions, backslashEscapes: backslashEscapes))
     }
 
     static func parse(exePath: String, args: [String]) -> EmulatorLaunch? {
@@ -69,6 +101,11 @@ public struct EmulatorLaunch: Equatable, Sendable {
         // `arch -arm64 <emulator> …`: Steam on macOS launches games as x86_64, so shortcuts wrap emulators in arch.
         if (exePath as NSString).lastPathComponent == "arch" {
             guard let i = args.firstIndex(where: { !$0.hasPrefix("-") }) else { return nil }
+            return parse(exePath: args[i], args: Array(args[(i + 1)...]))
+        }
+        // `flatpak run [options] <app id> …`
+        if (exePath as NSString).lastPathComponent == "flatpak" {
+            guard let r = args.firstIndex(of: "run"), let i = args[(r + 1)...].firstIndex(where: { !$0.hasPrefix("-") }) else { return nil }
             return parse(exePath: args[i], args: Array(args[(i + 1)...]))
         }
         let emulator: Emulator
@@ -104,24 +141,25 @@ public struct EmulatorLaunch: Equatable, Sendable {
         return EmulatorLaunch(emulator: emulator, coreFile: core, romPath: rom)
     }
 
-    /// An exe or `open -a` value names emulator E if it ends in `/<app>` or `/<app>.app`, or contains `<app>.app/`.
+    /// An exe, `open -a` or Flatpak id names emulator E if it ends in `/<name>`, `/<name>.app` or `/<name>.exe`, or contains `<name>.app/`.
     static func match(_ path: String) -> Emulator? {
-        let p = path.lowercased()
+        var p = path.lowercased().replacingOccurrences(of: "\\", with: "/")
+        if p.hasSuffix(".exe") { p.removeLast(4) }
         return Emulator.allCases.first { e in
-            e.appNames.map { $0.lowercased() }.contains { app in
+            (e.appNames + e.binaryNames + [e.flatpakID].compactMap { $0 }).map { $0.lowercased() }.contains { app in
                 p == app || p.hasSuffix("/\(app)") || p.hasSuffix("/\(app).app") || p.contains("\(app).app/") || p == "\(app).app"
             }
         }
     }
 
-    /// Shell-style splitting: double quotes, single quotes and backslash escapes.
-    static func tokenize(_ s: String) -> [String] {
+    /// Shell-style splitting: double quotes, single quotes and (unless turned off) backslash escapes.
+    static func tokenize(_ s: String, backslashEscapes: Bool = EmulatorLaunch.backslashEscapes) -> [String] {
         var tokens: [String] = [], current = "", inToken = false
         var quote: Character?
         var escaped = false
         for ch in s {
             if escaped { current.append(ch); escaped = false; inToken = true; continue }
-            if ch == "\\" && quote != "'" { escaped = true; continue }
+            if backslashEscapes && ch == "\\" && quote != "'" { escaped = true; continue }
             if let q = quote {
                 if ch == q { quote = nil } else { current.append(ch) }
                 continue

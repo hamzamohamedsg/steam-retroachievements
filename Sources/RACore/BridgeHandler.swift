@@ -12,14 +12,25 @@ public struct Services: Sendable {
     }
 }
 
+/// What the Settings dialog in Steam asks the app to do.
 public struct BridgeActions: Sendable {
-    public var openSettings, openAddGames: @Sendable () async -> Void
     public var openURL: @Sendable (URL) async -> Void
     public var log: @Sendable (String, String) -> Void
+    /// The signed-in username, and whether the app opens at login.
+    public var account: @Sendable () async -> (username: String?, openAtLogin: Bool)
+    /// nil on success, otherwise the error to show.
+    public var signIn: @Sendable (_ username: String, _ apiKey: String) async -> String?
+    public var signOut: @Sendable () async -> Void
+    /// Returns the setting now in effect.
+    public var setOpenAtLogin: @Sendable (Bool) async -> Bool
+    public var uninstall: @Sendable () async -> Void
 
-    public init(openSettings: @escaping @Sendable () async -> Void, openAddGames: @escaping @Sendable () async -> Void,
-                openURL: @escaping @Sendable (URL) async -> Void, log: @escaping @Sendable (String, String) -> Void) {
-        self.openSettings = openSettings; self.openAddGames = openAddGames; self.openURL = openURL; self.log = log
+    public init(openURL: @escaping @Sendable (URL) async -> Void = { _ in }, log: @escaping @Sendable (String, String) -> Void = { _, _ in },
+                account: @escaping @Sendable () async -> (username: String?, openAtLogin: Bool) = { (nil, false) },
+                signIn: @escaping @Sendable (String, String) async -> String? = { _, _ in nil }, signOut: @escaping @Sendable () async -> Void = {},
+                setOpenAtLogin: @escaping @Sendable (Bool) async -> Bool = { $0 }, uninstall: @escaping @Sendable () async -> Void = {}) {
+        self.openURL = openURL; self.log = log; self.account = account; self.signIn = signIn; self.signOut = signOut
+        self.setOpenAtLogin = setOpenAtLogin; self.uninstall = uninstall
     }
 }
 
@@ -30,9 +41,12 @@ public final class BridgeHandler: BridgeHandling {
     let services: @Sendable () async -> Services?
     let actions: BridgeActions
     let push: @Sendable (String) async -> Void
+    let installed: @Sendable () -> Installed
+    let hasher: any Fingerprinting
 
-    public init(services: @escaping @Sendable () async -> Services?, actions: BridgeActions, push: @escaping @Sendable (String) async -> Void) {
-        self.services = services; self.actions = actions; self.push = push
+    public init(services: @escaping @Sendable () async -> Services?, actions: BridgeActions, push: @escaping @Sendable (String) async -> Void,
+                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher()) {
+        self.services = services; self.actions = actions; self.push = push; self.installed = installed; self.hasher = hasher
     }
 
     struct ShortcutParams: Decodable { var shortcut: ShortcutInfo }
@@ -42,6 +56,22 @@ public final class BridgeHandler: BridgeHandling {
     struct URLParams: Decodable { var url: String }
     struct SearchResult: Encodable { var gameId: Int; var title, consoleName, iconURL: String; var numAchievements: Int }
     struct ConsoleResult: Encodable { var id: Int; var name: String }
+    struct SignInParams: Decodable { var username, apiKey: String }
+    struct SignInResult: Encodable { var error: String? }
+    struct ToggleParams: Decodable { var on: Bool }
+    struct EmulatorStatus: Encodable { var name: String; var installed: Bool }
+    struct SettingsResult: Encodable { var username: String?; var openAtLogin: Bool; var emulators: [EmulatorStatus] }
+    struct ShortcutLine: Decodable { var exe, launchOptions: String }
+    /// Override keys are a folder path and a console id (as text: JSON object keys).
+    struct ScanParams: Decodable { var folder: String?; var shortcuts: [ShortcutLine]; var consoleOverrides: [String: Int]; var emulatorOverrides: [String: Emulator] }
+    struct Choice: Encodable { var id, name: String }
+    struct ScanRow: Encodable {
+        var id, title, folder, status, statusText: String
+        var consoleId: Int?, consoleName: String?, emulator: String?
+        var emulatorChoices: [Choice]
+        var shortcut: ShortcutSpec?
+    }
+    struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
 
     public func handle(method: String, params: Data) async throws -> Data {
         let d = JSONDecoder()
@@ -68,12 +98,24 @@ public final class BridgeHandler: BridgeHandling {
             })
         case "consoles":
             return try encode(Consoles.all.map { ConsoleResult(id: $0.id, name: $0.name) })
-        case "openSettings":
-            await actions.openSettings()
+        case "settings":
+            let (username, openAtLogin) = await actions.account()
+            let found = installed().emulators
+            return try encode(SettingsResult(username: username, openAtLogin: openAtLogin,
+                                             emulators: Emulator.allCases.map { EmulatorStatus(name: $0.displayName, installed: found[$0] != nil) }))
+        case "signIn":
+            let p = try d.decode(SignInParams.self, from: params)
+            return try encode(SignInResult(error: await actions.signIn(p.username, p.apiKey)))
+        case "signOut":
+            await actions.signOut()
             return Data("null".utf8)
-        case "openAddGames":
-            await actions.openAddGames()
+        case "setOpenAtLogin":
+            return try encode(await actions.setOpenAtLogin(try d.decode(ToggleParams.self, from: params).on))
+        case "uninstall":
+            await actions.uninstall()
             return Data("null".utf8)
+        case "scanGames":
+            return try encode(scan(try d.decode(ScanParams.self, from: params)))
         case "openURL":
             let p = try d.decode(URLParams.self, from: params)
             guard BridgeRouter.isAllowedExternalURL(p.url), let url = URL(string: p.url) else { throw BridgeError.urlNotAllowed }
@@ -85,6 +127,29 @@ public final class BridgeHandler: BridgeHandling {
     }
 
     enum BridgeError: Error { case unknownMethod(String), urlNotAllowed }
+
+    private func scan(_ p: ScanParams) -> ScanResult {
+        let installed = installed()
+        let folder = p.folder.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Scanner.defaultFolder()
+        let existing = Set(p.shortcuts.compactMap { EmulatorLaunch.parse(exe: $0.exe, launchOptions: $0.launchOptions)?.romPath })
+        let emulatorOverrides = Dictionary(p.emulatorOverrides.compactMap { k, v in Int(k).map { ($0, v) } }) { a, _ in a }
+        let items = Scanner(installed: installed, hasher: hasher)
+            .scan(folder: folder, existingRomPaths: existing, consoleOverrides: p.consoleOverrides, emulatorOverrides: emulatorOverrides)
+        return ScanResult(folder: folder.path, items: items.map { item in
+            let (status, text): (String, String) = switch item.status {
+            case .ready: ("ready", "Ready")
+            case .alreadyInSteam: ("alreadyInSteam", "Already in Steam")
+            case .noEmulator(let hint): ("noEmulator", hint)
+            case .chooseConsole: ("chooseConsole", "Choose a console")
+            }
+            var choices = item.consoleId.map(EmulatorPreference.order(for:)) ?? []
+            if item.consoleId != nil, !choices.contains(.retroarch) { choices.append(.retroarch) }
+            return ScanRow(id: item.romPath, title: item.title, folder: (item.romPath as NSString).deletingLastPathComponent, status: status, statusText: text,
+                           consoleId: item.consoleId, consoleName: item.consoleId.flatMap(Consoles.byID)?.name, emulator: item.emulator?.rawValue,
+                           emulatorChoices: choices.filter { installed.emulators[$0] != nil }.map { Choice(id: $0.rawValue, name: $0.displayName) },
+                           shortcut: item.status == .ready ? Scanner.shortcut(for: item, installed: installed) : nil)
+        })
+    }
 
     private func panel(_ shortcut: ShortcutInfo, fresh: Bool) async -> PanelPayload {
         guard let s = await services() else { return PanelBuilder.signedOut() }

@@ -1,5 +1,10 @@
+#if os(macOS)
 import AppKit
+#endif
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public struct CDPTarget: Decodable, Equatable, Sendable {
     public let id, title, type: String
@@ -30,17 +35,21 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     private var socket: URLSessionWebSocketTask?
     private var nextId = 1
     private var pending: [Int: CheckedContinuation<JSONBox, Error>] = [:]
-    private var timer: Timer?
+    private var poller: Task<Void, Never>?
+    /// When this app first saw Steam running: the launch time where the OS doesn't report one.
+    private var steamSeen: Date?
 
     public init(marker: DebugMarker, script: @escaping () -> String, onBinding: @escaping @Sendable (String) async -> String?) {
         self.marker = marker; self.script = script; self.onBinding = onBinding
     }
 
     public func start() {
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        poller = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.tick()
+                try? await Task.sleep(for: .seconds(3))
+            }
         }
-        tick()
     }
 
     /// Evaluates JS in SharedJSContext and returns its value (promises awaited).
@@ -52,6 +61,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         return (res["result"] as? [String: Any])?["value"]
     }
 
+    #if os(macOS)
     public func restartSteam() async {
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first else { return }
         let url = app.bundleURL
@@ -59,6 +69,12 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(500)) }
         if let url { _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: .init()) }
     }
+
+    /// Brings Steam's window forward, e.g. after opening one of our dialogs in it.
+    public func activateSteam() {
+        NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first?.activate()
+    }
+    #endif
 
     public nonisolated static func sharedJSContext(in targets: [CDPTarget]) -> CDPTarget? {
         targets.first { $0.title == "SharedJSContext" && $0.webSocketDebuggerUrl != nil }
@@ -83,9 +99,10 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         Task {
             defer { ticking = false }
             try? marker.ensure()
-            let app = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID).first
+            let (running, launched) = Self.steamProcess()
+            steamSeen = running ? steamSeen ?? Date() : nil
             let targets = await Self.fetchTargets()
-            let next = Self.decide(steamRunning: app != nil, steamLaunched: app?.launchDate, markerCreated: marker.createdAt,
+            let next = Self.decide(steamRunning: running, steamLaunched: launched ?? steamSeen, markerCreated: marker.createdAt,
                                    portAnswered: targets != nil, now: Date())
             state = next
             if next == .connecting, let target = targets.flatMap(Self.sharedJSContext(in:)),
@@ -93,6 +110,24 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
                 await connect(ws)
             }
         }
+    }
+
+    /// Whether Steam is running, and when it started if the OS says.
+    nonisolated static func steamProcess() -> (running: Bool, launched: Date?) {
+        #if os(macOS)
+        let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+        return (app != nil, app?.launchDate)
+        #elseif os(Windows)
+        let out = runProcess("C:\\Windows\\System32\\tasklist.exe", ["/FI", "IMAGENAME eq steam.exe", "/NH"]).output
+        return (out.lowercased().contains("steam.exe"), nil)
+        #else
+        let pids = (try? FileManager.default.contentsOfDirectory(atPath: "/proc")) ?? []
+        let running = pids.contains { pid in
+            pid.allSatisfy(\.isNumber) && (try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == "steam"
+        }
+        return (running, nil)
+        #endif
     }
 
     private nonisolated static func fetchTargets() async -> [CDPTarget]? {

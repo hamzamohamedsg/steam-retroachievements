@@ -70,3 +70,17 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(l == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/fceumm_libretro.dylib", romPath: "/r/nes/From Below.nes"))
     #expect(EmulatorLaunch.parse(exe: "\"/usr/bin/arch\"", launchOptions: "-arm64 \"/System/Applications/Calculator.app/Contents/MacOS/Calculator\"") == nil)
 }
+
+@Test func parsesFlatpakRun() {
+    let l = EmulatorLaunch.parse(exe: "/usr/bin/flatpak", launchOptions: "run --branch=stable --arch=x86_64 org.duckstation.DuckStation -batch -- \"/r/psx/a.cue\"")
+    #expect(l == EmulatorLaunch(emulator: .duckstation, coreFile: nil, romPath: "/r/psx/a.cue"))
+    #expect(EmulatorLaunch.parse(exe: "/usr/bin/flatpak", launchOptions: "run org.mozilla.firefox") == nil)
+}
+
+@Test func parsesLinuxAndWindowsPaths() {
+    #expect(EmulatorLaunch.parse(exe: "\"/usr/bin/dolphin-emu\"", launchOptions: "-b -e \"/r/gc/a.iso\"")?.emulator == .dolphin)
+    let w = EmulatorLaunch.parse(exe: #""C:\RetroArch-Win64\retroarch.exe""#, launchOptions: #"-L "C:\RetroArch-Win64\cores\snes9x_libretro.dll" "C:\ROMs\snes\a.sfc""#, backslashEscapes: false)
+    #expect(w == EmulatorLaunch(emulator: .retroarch, coreFile: #"C:\RetroArch-Win64\cores\snes9x_libretro.dll"#, romPath: #"C:\ROMs\snes\a.sfc"#))
+    #expect(Consoles.forCore(file: w?.coreFile ?? "").map(\.id) == [3])
+    #expect(Consoles.forCore(file: "/c/mgba_libretro.so").map(\.id) == [4, 5, 6])
+}

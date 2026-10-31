@@ -16,8 +16,8 @@ func touch(_ root: URL, _ rel: String) {
 
 func installed(cores: [String]) -> Installed {
     let dir = tempDir()
-    for c in cores { touch(dir, "\(c)_libretro.dylib") }
-    return Installed(emulators: [.retroarch: "/A/RetroArch", .duckstation: "/A/DuckStation"], coresDirectory: dir)
+    for c in cores { touch(dir, "\(c)_libretro.\(Installed.coreExtension)") }
+    return Installed(emulators: [.retroarch: Launcher(exe: "/A/RetroArch"), .duckstation: Launcher(exe: "/A/DuckStation")], coresDirectory: dir)
 }
 
 @Test func scansFolderTree() {
@@ -30,8 +30,8 @@ func installed(cores: [String]) -> Installed {
     #expect(items.count == 3)
     let smw = items.first { $0.title == "Super Mario World" }, gbc = items.first { $0.title == "game" }, ff7 = items.first { $0.title == "FF7" }
     #expect(smw?.consoleId == 3 && smw?.emulator == .retroarch && smw?.status == .ready)
-    #expect(smw?.coreFile?.hasSuffix("/snes9x_libretro.dylib") == true)
-    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.dylib") == true)
+    #expect(smw?.coreFile?.hasSuffix("/snes9x_libretro.\(Installed.coreExtension)") == true)
+    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.\(Installed.coreExtension)") == true)
     #expect(ff7?.consoleId == 12 && ff7?.emulator == .duckstation && ff7?.status == .ready)
 }
 
@@ -67,10 +67,21 @@ func installed(cores: [String]) -> Installed {
     let inst = installed(cores: ["snes9x"])
     let item = ScanItem(romPath: "/r/snes/Super Mario World (USA).sfc", title: "Super Mario World", consoleId: 3, emulator: .retroarch,
                         coreFile: inst.coresDirectory.appendingPathComponent("snes9x_libretro.dylib").path, status: .ready)
-    let s = Scanner.shortcut(for: item, installed: inst)
+    let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: true)
     // Steam on macOS launches games as x86_64; arch -arm64 keeps emulators native so arm64 cores load.
     #expect(s.exe == "\"/usr/bin/arch\"")
     #expect(s.launchOptions == "-arm64 \"/A/RetroArch\" -L \"\(inst.coresDirectory.path)/snes9x_libretro.dylib\" \"/r/snes/Super Mario World (USA).sfc\"")
     #expect(s.bundle == "/A/RetroArch")
     #expect(s.name == "Super Mario World")
+}
+
+@Test func shortcutWithoutArch() {
+    let inst = Installed(emulators: [.retroarch: Launcher(exe: "/usr/bin/flatpak", args: "run org.libretro.RetroArch")], coresDirectory: tempDir())
+    let item = ScanItem(romPath: "/r/nes/a.nes", title: "a", consoleId: 7, emulator: .retroarch, coreFile: "/c/mesen_libretro.so", status: .ready)
+    let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: false)
+    #expect(s.exe == "\"/usr/bin/flatpak\"")
+    #expect(s.launchOptions == "run org.libretro.RetroArch -L \"/c/mesen_libretro.so\" \"/r/nes/a.nes\"")
+    #expect(s.startDir == "\"/usr/bin/\"" && s.bundle == "/usr/bin/flatpak")
+    // The shortcut reads back as the same emulator, core and ROM.
+    #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/mesen_libretro.so", romPath: "/r/nes/a.nes"))
 }

@@ -1,14 +1,16 @@
 import Foundation
 
 public struct UninstallPaths: Sendable {
-    public var marker, dataDir, log, app: URL
-    public init(marker: URL, dataDir: URL, log: URL, app: URL) {
+    public var marker, dataDir, log: URL
+    /// The .app to trash on macOS; nil elsewhere, where the user deletes the program's folder.
+    public var app: URL?
+    public init(marker: URL, dataDir: URL, log: URL, app: URL?) {
         self.marker = marker; self.dataDir = dataDir; self.log = log; self.app = app
     }
 }
 
 public enum Uninstaller {
-    /// Removes everything the app made except the Steam shortcuts it added, then moves the app to the Trash.
+    /// Removes everything the app made except the Steam shortcuts it added, then moves the app to the Trash (macOS).
     public static func run(_ p: UninstallPaths, deleteCredentials: () -> Void, disableLogin: () -> Void) throws {
         let fm = FileManager.default
         disableLogin()
@@ -16,10 +18,13 @@ public enum Uninstaller {
         for url in [p.marker, p.dataDir, p.log] where fm.fileExists(atPath: url.path) {
             try fm.removeItem(at: url)
         }
-        if fm.fileExists(atPath: p.app.path) { try fm.trashItem(at: p.app, resultingItemURL: nil) }
+        #if os(macOS)
+        if let app = p.app, fm.fileExists(atPath: app.path) { try fm.trashItem(at: app, resultingItemURL: nil) }
+        #endif
     }
 }
 
+#if os(macOS)
 extension Emulator {
     /// The installed app bundle, looked up by name in /Applications and ~/Applications.
     public func installedApp(searchDirectories: [URL] = [URL(fileURLWithPath: "/Applications"),
@@ -33,3 +38,4 @@ extension Emulator {
         return nil
     }
 }
+#endif

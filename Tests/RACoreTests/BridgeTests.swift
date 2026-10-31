@@ -38,7 +38,7 @@ struct EchoHandler: BridgeHandling {
     let cache = DiskCache(directory: data.appendingPathComponent("cache"))
     cache.put("gamelist-7", [smbEntry])
     cache.put("progress-1446", progress([ach(1, order: 1)]))
-    let handler = BridgeHandler(services: { services }, actions: BridgeActions(openSettings: {}, openAddGames: {}, openURL: { _ in }, log: { _, _ in }),
+    let handler = BridgeHandler(services: { services }, actions: BridgeActions(),
                                 push: { _ in })
     let params = try JSONEncoder().encode(["shortcut": smb()])
     let result = try await handler.handle(method: "getPanel", params: params)
@@ -54,4 +54,20 @@ struct EchoHandler: BridgeHandling {
     let js = await BridgeRouter(handler: Leaky()).respond(to: #"{"id":1,"method":"x","params":{}}"#) ?? ""
     #expect(!js.contains("SECRET"))
     #expect(js.contains(#""error""#))
+}
+
+@Test func scanGamesReturnsShortcuts() async throws {
+    let root = tempDir()
+    touch(root, "snes/a.sfc")
+    touch(root, "snes/b.sfc")
+    let inst = installed(cores: ["snes9x"])
+    let handler = BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, installed: { inst }, hasher: PathHasher(byFile: [:]))
+    let existing = root.appendingPathComponent("snes/b.sfc").resolvingSymlinksInPath().path
+    let params = #"{"folder":"\#(root.path)","consoleOverrides":{},"emulatorOverrides":{},"shortcuts":[{"exe":"/A/RetroArch","launchOptions":"\"\#(existing)\""}]}"#
+    let result = try JSONSerialization.jsonObject(with: try await handler.handle(method: "scanGames", params: Data(params.utf8))) as? [String: Any]
+    let items = result?["items"] as? [[String: Any]] ?? []
+    #expect(items.map { $0["status"] as? String } == ["ready", "alreadyInSteam"])
+    #expect((items.first?["shortcut"] as? [String: Any])?["name"] as? String == "a")
+    #expect(items.last?["shortcut"] == nil)
+    #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }

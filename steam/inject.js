@@ -6,9 +6,9 @@
   // ---------------------------------------------------------------- bridge
   let nextId = 1;
   const pending = new Map();
-  const call = (method, params = {}) => new Promise((resolve, reject) => {
+  const call = (method, params = {}, timeoutMs = 20000) => new Promise((resolve, reject) => {
     const id = nextId++;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timed out`)); }, 20000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`${method} timed out`)); }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     window.__sra_send(JSON.stringify({ id, method, params }));
   });
@@ -123,7 +123,7 @@
   .sra-card b { color: #fff; font-size: 13px; display: block; margin-bottom: 2px; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
   .sra-dialog { width: min(680px, 90vw); max-height: 80vh; display: flex; flex-direction: column; background: #1b2838; border-radius: 3px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); font-family: "Motiva Sans", Arial, sans-serif; color: #c6d4df; }
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); font-family: "Motiva Sans", Arial, sans-serif; color: #c6d4df; font-size: 13px; }
   .sra-dialog-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); color: #fff; font-size: 16px; }
   .sra-dialog-body { overflow: auto; padding: 8px 16px 16px; }
   .sra-row { display: flex; gap: 12px; align-items: center; padding: 8px; border-radius: 2px; background: rgba(255, 255, 255, 0.04); margin-top: 6px; }
@@ -138,6 +138,16 @@
   .sra-bpm { font-size: 17px; margin: 16px 2.8vw; } .sra-bpm .sra-row { background: rgba(255, 255, 255, 0.06); }
   .sra-bpm .sra-head { font-size: 17px; } .sra-bpm .sra-muted, .sra-bpm .sra-details { font-size: 15px; }
   .sra-bpm .sra-summary { font-size: 19px; } .sra-bpm .sra-game-title { font-size: 22px; } .sra-bpm .sra-notice { font-size: 15px; }
+  .sra-btn:disabled, .sra-btn:disabled:hover { opacity: 0.5; cursor: default; background: rgba(255, 255, 255, 0.1); }
+  .sra-btn.sra-danger:hover { background: #c4302b; }
+  .sra-input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
+  .sra-form label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  .sra-form .sra-head { margin: 18px 0 8px; }
+  .sra-form label.sra-check { flex-direction: row; align-items: center; gap: 8px; }
+  .sra-error { color: #ff7b7b; font-size: 12px; }
+  .sra-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  .sra-footer .sra-muted { white-space: pre-line; }
+  .sra-row select { max-width: 170px; }
   .sra-btn.sra-addgames { margin-left: 8px; background: none; color: #8b929b; font-size: 12px; padding: 4px 6px; }
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
   `;
@@ -199,7 +209,7 @@
     const p = payload, kids = [el(doc, "div", { class: "sra-head" }, "RetroAchievements")];
     if (p.state === "signedOut") {
       kids.push(el(doc, "div", {}, p.message), el(doc, "div", { class: "sra-actions" },
-        el(doc, "button", { class: "sra-btn", onclick: () => call("openSettings") }, "Open Steam RetroAchievements")));
+        el(doc, "button", { class: "sra-btn", onclick: () => openSettings() }, "Sign In")));
     } else if (p.state === "notMatched") {
       kids.push(el(doc, "div", {}, p.message), el(doc, "div", { class: "sra-actions" },
         el(doc, "button", { class: "sra-btn", onclick: () => openChooser(p.consoleId) }, "Choose game")));
@@ -316,6 +326,123 @@
     search();
   };
 
+  // ---------------------------------------------------------------- settings and add games (desktop library only)
+  // Opened from outside (the Mac menu, first run) through pendingOpen, so tick() has settled the page and won't close them.
+  let pendingOpen = null;
+  const desktopDoc = () => { const s = steamUI.surface(); return s && !s.bpm ? s.doc : null; };
+  const head = (doc, text) => el(doc, "div", { class: "sra-head" }, text);
+  const signedInChanged = () => { if (current) { current.payload = null; load(current.appid, "getPanel"); } };
+
+  const openSettings = safe(async () => {
+    const doc = desktopDoc();
+    if (!doc) { pendingOpen = openSettings; return; }
+    ensureStyle(doc);
+    const body = el(doc, "div", { class: "sra-dialog-body sra-form" });
+    overlay(doc, "Steam RetroAchievements", body);
+    const draw = safe(async () => {
+      const s = await call("settings");
+      const kids = [head(doc, "RetroAchievements")];
+      if (s.username) {
+        kids.push(el(doc, "div", { class: "sra-actions" }, `Signed in as ${s.username}`,
+          el(doc, "button", { class: "sra-btn", onclick: async () => { await call("signOut"); signedInChanged(); draw(); } }, "Sign Out")));
+      } else {
+        const user = el(doc, "input", { class: "sra-input", placeholder: "Your RetroAchievements username", autocomplete: "off", spellcheck: "false" });
+        const key = el(doc, "input", { class: "sra-input", type: "password", placeholder: "Paste your Web API key", autocomplete: "off" });
+        const error = el(doc, "div", { class: "sra-error" });
+        const submit = el(doc, "button", { class: "sra-btn", type: "submit" }, "Sign In");
+        kids.push(el(doc, "form", { onsubmit: async (e) => {
+          e.preventDefault();
+          if (!user.value.trim() || !key.value.trim()) { error.textContent = "Enter your username and Web API key."; return; }
+          submit.disabled = true;
+          error.textContent = "";
+          const r = await call("signIn", { username: user.value, apiKey: key.value }).finally(() => { submit.disabled = false; });
+          if (r.error) { error.textContent = r.error; return; }
+          signedInChanged();
+          draw();
+        } },
+        el(doc, "label", {}, "Username", user), el(doc, "label", {}, "Web API key", key),
+        el(doc, "button", { class: "sra-link", type: "button", onclick: () => call("openURL", { url: "https://retroachievements.org/settings" }) }, "Find your Web API key"),
+        error, el(doc, "div", { class: "sra-actions" }, submit)));
+        setTimeout(() => user.focus(), 0);
+      }
+      kids.push(head(doc, "Emulators"), el(doc, "dl", { class: "sra-details" },
+        s.emulators.flatMap((e) => [el(doc, "dt", {}, e.name), el(doc, "dd", {}, e.installed ? "Installed" : "Not installed")])));
+      const login = el(doc, "input", { type: "checkbox", onchange: async () => { login.checked = await call("setOpenAtLogin", { on: login.checked }); } });
+      login.checked = s.openAtLogin;
+      kids.push(head(doc, "General"), el(doc, "label", { class: "sra-check" }, login, "Open at login"));
+      const uninstall = el(doc, "div", { class: "sra-actions" });
+      const ask = () => uninstall.replaceChildren(
+        el(doc, "span", { class: "sra-muted" }, "This turns off Steam's debug switch and deletes your saved sign-in and cached data. On a Mac it also moves the app to the Trash; elsewhere, delete the program's folder afterwards. Games it added stay in your library. Restart Steam when it's done."),
+        el(doc, "button", { class: "sra-btn sra-danger", onclick: async () => { await call("uninstall"); window.__sra.dispose(); } }, "Uninstall"),
+        el(doc, "button", { class: "sra-link", onclick: () => reset() }, "Cancel"));
+      const reset = () => uninstall.replaceChildren(el(doc, "button", { class: "sra-btn", onclick: ask }, "Uninstall…"));
+      reset();
+      kids.push(head(doc, "Uninstall"), uninstall);
+      body.replaceChildren(...kids);
+    });
+    draw();
+  });
+
+  const openAddGames = safe(async () => {
+    const doc = desktopDoc();
+    if (!doc) { pendingOpen = openAddGames; return; }
+    ensureStyle(doc);
+    const consoles = await call("consoles");
+    const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false };
+    const folder = el(doc, "input", { class: "sra-input", placeholder: "ROM folder", spellcheck: "false", onkeydown: (e) => { if (e.key === "Enter") scan(); } });
+    const list = el(doc, "div", { class: "sra-dialog-body" });
+    const footer = el(doc, "div", { class: "sra-footer" });
+    const chosen = () => st.items.filter((i) => i.status === "ready" && st.included.has(i.id));
+    const drawFooter = (message = "") => footer.replaceChildren(el(doc, "div", { class: "sra-muted" }, message),
+      el(doc, "button", { class: "sra-btn", disabled: st.busy || !chosen().length ? "" : undefined, onclick: () => add() }, `Add ${chosen().length} Games to Steam`));
+    const select = (options, value, onchange) => {
+      const s = el(doc, "select", { class: "sra-input", onchange: (e) => onchange(e.target.value) }, options.map(([v, label]) => el(doc, "option", { value: v }, label)));
+      s.value = value;
+      return s;
+    };
+    const drawList = () => list.replaceChildren(...st.items.map((it) => {
+      const box = el(doc, "input", { type: "checkbox", onchange: () => { box.checked ? st.included.add(it.id) : st.included.delete(it.id); drawFooter(); } });
+      box.checked = st.included.has(it.id);
+      box.disabled = it.status !== "ready";
+      const consoleCell = it.status === "chooseConsole"
+        ? select([["", "Choose console…"], ...consoles.map((c) => [String(c.id), c.name])], "", (v) => { st.consoleOverrides[it.folder] = Number(v); scan(); })
+        : el(doc, "div", { class: "sra-row-side" }, it.consoleName ?? "");
+      const emulatorCell = it.emulator && it.emulatorChoices.length > 1
+        ? select(it.emulatorChoices.map((c) => [c.id, c.name]), it.emulator, (v) => { st.emulatorOverrides[String(it.consoleId)] = v; scan(); })
+        : el(doc, "div", { class: "sra-row-side" }, it.emulatorChoices.find((c) => c.id === it.emulator)?.name ?? "");
+      return el(doc, "div", { class: "sra-row" }, box,
+        el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, it.title), el(doc, "div", { class: "sra-muted" }, it.statusText)),
+        consoleCell, emulatorCell);
+    }));
+    // Hashing ROMs to tell consoles apart can take a while in a big folder.
+    const scan = safe(async (message = "") => {
+      st.busy = true;
+      drawFooter("Scanning…");
+      try {
+        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: await listShortcuts(),
+          consoleOverrides: st.consoleOverrides, emulatorOverrides: st.emulatorOverrides }, 180000);
+        folder.value = r.folder;
+        st.items = r.items;
+        st.included = new Set(r.items.filter((i) => i.status === "ready").map((i) => i.id));
+        drawList();
+        if (!message && !r.items.length) message = "No games found in this folder.";
+      } finally {
+        st.busy = false;
+        drawFooter(message);
+      }
+    });
+    const add = safe(async () => {
+      const items = chosen();
+      st.busy = true;
+      drawFooter("Adding…");
+      const results = await addShortcuts(items.map((i) => i.shortcut));
+      const errors = results.filter((r) => r.error).map((r) => `${r.name}: ${r.error}`);
+      await scan([`Added ${results.length - errors.length} games to Steam.`, ...errors].join("\n"));
+    });
+    overlay(doc, "Add Games", el(doc, "div", { class: "sra-search" }, folder, el(doc, "button", { class: "sra-btn", onclick: () => scan() }, "Scan")), list, footer);
+    scan();
+  });
+
   // ---------------------------------------------------------------- navigation
   const load = safe(async (appid, method) => {
     const shortcut = await steamUI.shortcut(appid);
@@ -333,16 +460,17 @@
     if (current?.appid === appid) render(payload);   // drop replies for a page we've left
   });
 
-  let lastDoc = null;
+  let lastDoc = null, lastAppid = null;
   const tick = safe(() => {
     const surface = steamUI.surface();
     if (!surface) return;
     const doc = surface.doc;
-    if (!surface.bpm) ensureAddGamesButton(doc);
+    if (!surface.bpm) ensureLibraryButtons(doc);
     const appid = steamUI.appid(surface);
-    if (appid !== current?.appid || doc !== lastDoc) {
+    if (appid !== lastAppid || doc !== lastDoc) {
       lastDoc?.querySelectorAll?.("[data-sra-panel]").forEach((n) => n.remove());
       lastDoc = doc;
+      lastAppid = appid;
       removePanel();
       closeOverlay?.();
       current = appid && steamUI.isShortcut(appid) ? { appid, bpm: surface.bpm, shortcut: null, payload: null } : null;
@@ -350,15 +478,17 @@
     } else if (current?.payload && !doc.querySelector("[data-sra-panel]") && current.payload.state !== "hidden") {
       render(current.payload);   // Steam re-rendered the page and dropped our node
     }
+    if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }
   });
 
-  const ensureAddGamesButton = (doc) => {
+  const ensureLibraryButtons = (doc) => {
     if (doc.querySelector("[data-sra-addgames]")) return;
     const steamButton = steamUI.addGameButton(doc);
     if (!steamButton) return;
     ensureStyle(doc);
-    const b = el(doc, "button", { class: "sra-btn sra-addgames", "data-sra-addgames": "", onclick: () => call("openAddGames") }, "Add Games");
-    steamButton.after(b);
+    steamButton.after(
+      el(doc, "button", { class: "sra-btn sra-addgames", "data-sra-addgames": "", onclick: () => openAddGames() }, "Add Games"),
+      el(doc, "button", { class: "sra-btn sra-addgames", onclick: () => openSettings() }, "RetroAchievements"));
   };
 
   let lifetime = null;
@@ -397,6 +527,8 @@
     }),
     listShortcuts,
     addShortcuts,
+    openSettings: () => { pendingOpen = openSettings; },
+    openAddGames: () => { pendingOpen = openAddGames; },
   };
   log("info", "inject loaded");
 })();

@@ -16,29 +16,84 @@ public struct ScanItem: Identifiable, Equatable, Sendable {
     }
 }
 
-/// What's installed: emulator → executable path, and RetroArch's cores folder.
+/// How Steam starts an emulator: its executable plus any arguments that come before the emulator's own (`run <id>` for Flatpak).
+public struct Launcher: Equatable, Sendable {
+    public var exe: String
+    public var args: String
+    public init(exe: String, args: String = "") { self.exe = exe; self.args = args }
+}
+
+/// What's installed: emulator → launcher, and RetroArch's cores folder.
 public struct Installed: Sendable {
-    public var emulators: [Emulator: String]
+    public var emulators: [Emulator: Launcher]
     public var coresDirectory: URL
 
-    public init(emulators: [Emulator: String], coresDirectory: URL) {
+    public init(emulators: [Emulator: Launcher], coresDirectory: URL) {
         self.emulators = emulators; self.coresDirectory = coresDirectory
     }
 
+    #if os(macOS)
+    public static let coreExtension = "dylib"
+    #elseif os(Windows)
+    public static let coreExtension = "dll"
+    #else
+    public static let coreExtension = "so"
+    #endif
+
     public static func detect() -> Installed {
-        var found: [Emulator: String] = [:]
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var found: [Emulator: Launcher] = [:]
+        #if os(macOS)
         for e in Emulator.allCases {
-            if let exe = e.installedApp().flatMap({ Bundle(url: $0)?.executableURL?.path }) { found[e] = exe }
+            if let exe = e.installedApp().flatMap({ Bundle(url: $0)?.executableURL?.path }) { found[e] = Launcher(exe: exe) }
         }
-        let cores = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RetroArch/cores")
+        let cores = home.appendingPathComponent("Library/Application Support/RetroArch/cores")
+        #else
+        let env = ProcessInfo.processInfo.environment
+        #if os(Windows)
+        // shortcut: only PATH and default install folders are searched; portable emulators elsewhere need to be on PATH
+        let pathDirs = (env["Path"] ?? env["PATH"] ?? "").split(separator: ";").map(String.init)
+        let extraDirs = { (e: Emulator) in
+            ([e == .retroarch ? "C:\\RetroArch-Win64" : nil].compactMap { $0 }
+             + [env["ProgramFiles"], env["LOCALAPPDATA"].map { $0 + "\\Programs" }].compactMap { $0 }.map { $0 + "\\" + e.displayName })
+        }
+        let file = { (dir: String, name: String) in dir + "\\" + name + ".exe" }
+        #else
+        // shortcut: AppImages aren't found unless they're on PATH under the emulator's binary name
+        let pathDirs = (env["PATH"] ?? "/usr/bin").split(separator: ":").map(String.init)
+        let extraDirs = { (_: Emulator) in [String]() }
+        let file = { (dir: String, name: String) in dir + "/" + name }
+        #endif
+        for e in Emulator.allCases {
+            let exe = (extraDirs(e) + pathDirs).lazy.flatMap { dir in e.binaryNames.lazy.map { file(dir, $0) } }
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+            if let exe {
+                found[e] = Launcher(exe: exe)
+            } else if let id = e.flatpakID, ["/var/lib/flatpak/app/\(id)", home.path + "/.local/share/flatpak/app/\(id)"].contains(where: FileManager.default.fileExists) {
+                found[e] = Launcher(exe: "/usr/bin/flatpak", args: "run \(id)")
+            }
+        }
+        #if os(Windows)
+        let cores = URL(fileURLWithPath: found[.retroarch]?.exe ?? "C:\\RetroArch-Win64\\retroarch.exe").deletingLastPathComponent().appendingPathComponent("cores")
+        #else
+        // shortcut: distro-packaged cores (/usr/lib/libretro) aren't looked at, only ones RetroArch's Core Downloader fetched
+        let cores = home.appendingPathComponent(found[.retroarch]?.exe == "/usr/bin/flatpak"
+            ? ".var/app/org.libretro.RetroArch/config/retroarch/cores" : ".config/retroarch/cores")
+        #endif
+        #endif
         return Installed(emulators: found, coresDirectory: cores)
     }
 
     /// The first installed core RetroArch has for a console, as a full path.
     func core(for console: Console) -> String? {
-        console.cores.map { coresDirectory.appendingPathComponent("\($0)_libretro.dylib").path }
+        console.cores.map { coresDirectory.appendingPathComponent("\($0)_libretro.\(Self.coreExtension)").path }
             .first { FileManager.default.fileExists(atPath: $0) }
     }
+}
+
+/// The fields a Steam shortcut needs. `bundle` is what Steam's AddShortcut gets before the exe is set (an .app on macOS).
+public struct ShortcutSpec: Encodable, Equatable, Sendable {
+    public var name, exe, launchOptions, startDir, bundle: String
 }
 
 /// Default emulator per console, in preference order (spec "Adding games").
@@ -93,15 +148,34 @@ public struct Scanner: Sendable {
         }
     }
 
-    /// Steam on macOS launches games as x86_64, which can't load arm64 cores, so the emulator runs through `arch -arm64`.
-    /// `bundle` is the .app that Steam's AddShortcut needs before the exe is switched to arch.
-    public static func shortcut(for item: ScanItem, installed: Installed) -> (name: String, exe: String, launchOptions: String, startDir: String, bundle: String) {
+    #if os(macOS)
+    public static let wrapsInArch = true
+    #else
+    public static let wrapsInArch = false
+    #endif
+
+    /// Steam on macOS launches games as x86_64, which can't load arm64 cores, so there the emulator runs through `arch -arm64`.
+    public static func shortcut(for item: ScanItem, installed: Installed, wrapInArch: Bool = Scanner.wrapsInArch) -> ShortcutSpec {
         let emulator = item.emulator ?? .retroarch
-        let exe = installed.emulators[emulator] ?? ""
-        let dir = (exe as NSString).deletingLastPathComponent + "/"
+        let launcher = installed.emulators[emulator] ?? Launcher(exe: "")
+        let exe = launcher.exe, args = emulator.launchOptions(rom: item.romPath, coreFile: item.coreFile)
+        let sep = exe.lastIndex { $0 == "/" || $0 == "\\" }
+        let dir = sep.map { String(exe[...$0]) } ?? ""
+        guard wrapInArch else {
+            return ShortcutSpec(name: item.title, exe: "\"\(exe)\"", launchOptions: launcher.args.isEmpty ? args : "\(launcher.args) \(args)",
+                                startDir: "\"\(dir)\"", bundle: exe)
+        }
         let bundle = exe.range(of: ".app/").map { String(exe[..<$0.lowerBound]) + ".app" } ?? exe
-        return (item.title, "\"/usr/bin/arch\"", "-arm64 \"\(exe)\" " + emulator.launchOptions(rom: item.romPath, coreFile: item.coreFile),
-                "\"\(dir)\"", bundle)
+        return ShortcutSpec(name: item.title, exe: "\"/usr/bin/arch\"", launchOptions: "-arm64 \"\(exe)\" " + args, startDir: "\"\(dir)\"", bundle: bundle)
+    }
+
+    /// `~/ROMs`, or EmuDeck's `~/Emulation/roms` when only that exists (it uses the same per-console folder names).
+    public static func defaultFolder() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let roms = home.appendingPathComponent("ROMs"), emudeck = home.appendingPathComponent("Emulation/roms")
+        if !FileManager.default.fileExists(atPath: roms.path), FileManager.default.fileExists(atPath: emudeck.path) { return emudeck }
+        try? FileManager.default.createDirectory(at: roms, withIntermediateDirectories: true)
+        return roms
     }
 
     private func item(_ path: String, _ title: String, _ console: Int, _ e: Emulator, _ core: String?, _ existing: Set<String>) -> ScanItem {
