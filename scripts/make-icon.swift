@@ -1,5 +1,6 @@
 // Draws the app icon: a gold pixel-art trophy on a Steam-blue rounded square.
-// Writes Resources/AppIcon.icns and docs/icon.png. Run: swift scripts/make-icon.swift
+// Writes Resources/AppIcon.icns (macOS), Resources/AppIcon.ico (Windows) and docs/icon.png (README, Linux).
+// Run: swift scripts/make-icon.swift
 import AppKit
 
 // G gold, L highlight, D shade, W sparkle; one character per pixel, top row first.
@@ -83,4 +84,16 @@ p.arguments = ["-c", "icns", iconset.path, "-o", root.appendingPathComponent("Re
 try p.run()
 p.waitUntilExit()
 precondition(p.terminationStatus == 0, "iconutil failed")
-print("Wrote Resources/AppIcon.icns and docs/icon.png")
+
+// ICO with PNG entries (Windows Vista and later): a 6-byte header, a 16-byte entry per size, then the PNGs.
+let pngs = [16, 24, 32, 48, 64, 256].map { ($0, draw(size: $0)) }
+var ico = Data([0, 0, 1, 0, UInt8(pngs.count), 0])
+var offset = 6 + 16 * pngs.count
+func le(_ v: Int, _ n: Int) -> [UInt8] { (0..<n).map { UInt8((v >> (8 * $0)) & 0xFF) } }
+for (size, png) in pngs {
+    ico += [UInt8(size % 256), UInt8(size % 256), 0, 0] + le(1, 2) + le(32, 2) + le(png.count, 4) + le(offset, 4)  // 256 is stored as 0
+    offset += png.count
+}
+for (_, png) in pngs { ico += png }
+try ico.write(to: root.appendingPathComponent("Resources/AppIcon.ico"))
+print("Wrote Resources/AppIcon.icns, Resources/AppIcon.ico and docs/icon.png")

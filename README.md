@@ -21,7 +21,7 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 
 1. Start the app:
    - **macOS:** open **Steam RetroAchievements** from your Applications folder.
-   - **Linux:** unpack `steam-retroachievements-linux.tar.gz` and run `./steam-retroachievements` from a terminal. Keep `inject.js` next to it. On a Steam Deck, do this in Desktop Mode.
+   - **Linux:** unpack `steam-retroachievements-linux.tar.gz` and run `./steam-retroachievements` from a terminal. Keep `inject.js` and `icon.png` next to it. On a Steam Deck, do this in Desktop Mode. The first run also adds **Steam RetroAchievements** to your app menu, so after that you can start it from there.
    - **Windows:** run `SteamRetroAchievements.exe`, with `inject.js` in the same folder.
 2. Restart Steam if asked. Steam only reads the developer switch when it starts. On macOS, the menu bar shows **Restart Steam to finish setup** with a button. On Linux the terminal and the log say so, on Windows the log; quit Steam and open it again yourself.
 3. When Steam connects, a **Steam RetroAchievements** dialog opens in Steam's library. Enter your RetroAchievements username and Web API key; the key is on [retroachievements.org/settings](https://retroachievements.org/settings). Click **Sign In**. Signing in also turns on **Open at login**: a login item on macOS, a systemd user service on Linux (it runs in Steam Deck's Game Mode too), a Run registry entry on Windows.
@@ -69,6 +69,7 @@ In Steam, open the **RetroAchievements** dialog, click **Uninstall…**, and con
 - your saved sign-in
 - cached data and the log
 - open at login
+- the app-menu entry (Linux)
 
 On macOS it then moves the app to the Trash; on Linux and Windows, delete the program's folder yourself. Restart Steam afterwards. Games the app added stay in your library.
 
@@ -88,9 +89,14 @@ node scripts/steam-eval.mjs 'MainWindowBrowserManager.m_lastLocation'   # poke a
 **Windows:** build on Windows with the Swift toolchain. The linker flags make it a windowless program, so no console opens at login:
 
 ```bash
-swift build -c release --product SteamRetroAchievements -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup
+rc.exe /fo .build\AppIcon.res Resources\AppIcon.rc
+swift build -c release --product SteamRetroAchievements -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup -Xlinker .build\AppIcon.res
 ```
 
+`rc.exe` comes with the Windows SDK that the Swift toolchain already needs; the first line puts the icon on the `.exe`.
+
 Copy `.build\release\SteamRetroAchievements.exe` and `steam\inject.js` into one folder.
+
+The icons come from `scripts/make-icon.swift` (`swift scripts/make-icon.swift`), which writes the macOS `.icns`, the Windows `.ico` and `docs/icon.png`.
 
 `docs/steam-internals.md` records what was verified about Steam's interface on macOS. Read it first when a Steam update breaks something.

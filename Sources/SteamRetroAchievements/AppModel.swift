@@ -60,6 +60,9 @@ import SteamBridge
         }
         steam.onError = { Log.error("steam: \($0)") }
         steam.start()  // also while signed out: the Steam panel then shows the sign-in prompt
+        #if os(Linux)
+        DesktopEntry.install()
+        #endif
         Log.info("launched")
     }
 
@@ -100,6 +103,9 @@ import SteamBridge
         } catch {
             Log.error("uninstall: \(error)")
         }
+        #if os(Linux)
+        try? FileManager.default.removeItem(at: DesktopEntry.file)
+        #endif
         Task {
             try? await Task.sleep(for: .seconds(1))
             exit(0)

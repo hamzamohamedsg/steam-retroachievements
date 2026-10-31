@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-builds the Linux program on a Mac with Swift's Static Linux SDK and packs it with inject.js into build/.
+# Cross-builds the Linux program on a Mac with Swift's Static Linux SDK and packs it with inject.js and the icon into build/.
 # Needs the swift.org toolchain matching the SDK (swiftly), not Command Line Tools: swift sdk install <static-linux bundle>.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,5 +9,6 @@ OUT="build/steam-retroachievements-linux"
 rm -rf "$OUT" && mkdir -p "$OUT"
 cp .build-linux/release/SteamRetroAchievements "$OUT/steam-retroachievements"
 cp steam/inject.js "$OUT/"
+cp docs/icon.png "$OUT/icon.png"
 tar -czf "$OUT.tar.gz" -C build "$(basename "$OUT")"
 echo "Built $OUT.tar.gz"

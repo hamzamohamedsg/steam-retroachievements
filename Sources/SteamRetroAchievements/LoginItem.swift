@@ -57,4 +57,25 @@ enum LoginItem {
         }
     }
 }
+
+/// An app-menu entry with the icon, pointing at wherever this copy of the program is (it's rewritten on every launch).
+enum DesktopEntry {
+    static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/applications/steam-retroachievements.desktop") }
+
+    static func install() {
+        let icon = URL(fileURLWithPath: AppPaths.executable).deletingLastPathComponent().appendingPathComponent("icon.png").path
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? """
+        [Desktop Entry]
+        Type=Application
+        Name=Steam RetroAchievements
+        Comment=Shows your RetroAchievements in the Steam library
+        Exec="\(AppPaths.executable)"
+        Icon=\(icon)
+        Terminal=false
+        Categories=Game;
+
+        """.write(to: file, atomically: true, encoding: .utf8)
+    }
+}
 #endif

@@ -1,0 +1,2 @@
+// Windows: puts the app icon on SteamRetroAchievements.exe. Compiled with rc.exe; see the README.
+1 ICON "AppIcon.ico"
