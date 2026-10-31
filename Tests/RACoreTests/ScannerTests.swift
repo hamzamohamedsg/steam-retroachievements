@@ -1,0 +1,76 @@
+import Foundation
+import Testing
+@testable import RACore
+
+struct PathHasher: Fingerprinting {
+    var byFile: [String: [ConsoleHash]]
+    func fingerprint(romPath: String, consoleId: Int) -> HashResult { .unsupportedFormat }
+    func allFingerprints(romPath: String) -> [ConsoleHash] { byFile[(romPath as NSString).lastPathComponent] ?? [] }
+}
+
+func touch(_ root: URL, _ rel: String) {
+    let url = root.appendingPathComponent(rel)
+    try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: url.path, contents: Data([0]))
+}
+
+func installed(cores: [String]) -> Installed {
+    let dir = tempDir()
+    for c in cores { touch(dir, "\(c)_libretro.dylib") }
+    return Installed(emulators: [.retroarch: "/A/RetroArch", .duckstation: "/A/DuckStation"], coresDirectory: dir)
+}
+
+@Test func scansFolderTree() {
+    let root = tempDir()
+    for f in ["snes/Super Mario World (USA).sfc", "misc/game.gbc", "psx/FF7/FF7 (Disc 1).cue", "psx/FF7/FF7 (Disc 1).bin", "psx/FF7/FF7.m3u", "notes.txt"] {
+        touch(root, f)
+    }
+    let scanner = Scanner(installed: installed(cores: ["snes9x", "gambatte"]), hasher: PathHasher(byFile: ["game.gbc": [ConsoleHash(consoleId: 6, hash: "h")]]))
+    let items = scanner.scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:]).sorted { $0.title < $1.title }
+    #expect(items.count == 3)
+    let smw = items.first { $0.title == "Super Mario World" }, gbc = items.first { $0.title == "game" }, ff7 = items.first { $0.title == "FF7" }
+    #expect(smw?.consoleId == 3 && smw?.emulator == .retroarch && smw?.status == .ready)
+    #expect(smw?.coreFile?.hasSuffix("/snes9x_libretro.dylib") == true)
+    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.dylib") == true)
+    #expect(ff7?.consoleId == 12 && ff7?.emulator == .duckstation && ff7?.status == .ready)
+}
+
+@Test func existingPathIsAlreadyInSteam() {
+    let root = tempDir()
+    touch(root, "snes/a.sfc")
+    let path = root.appendingPathComponent("snes/a.sfc").path
+    let items = Scanner(installed: installed(cores: ["snes9x"]), hasher: PathHasher(byFile: [:]))
+        .scan(folder: root, existingRomPaths: [path], consoleOverrides: [:], emulatorOverrides: [:])
+    #expect(items.first?.status == .alreadyInSteam)
+}
+
+@Test func ambiguousFileAsksForConsole() {
+    let root = tempDir()
+    touch(root, "misc/game.bin")
+    let hasher = PathHasher(byFile: ["game.bin": [ConsoleHash(consoleId: 1, hash: "a"), ConsoleHash(consoleId: 12, hash: "b")]])
+    let scanner = Scanner(installed: installed(cores: ["genesis_plus_gx"]), hasher: hasher)
+    #expect(scanner.scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:]).first?.status == .chooseConsole)
+    let fixed = scanner.scan(folder: root, existingRomPaths: [], consoleOverrides: [root.appendingPathComponent("misc").path: 1], emulatorOverrides: [:])
+    #expect(fixed.first?.consoleId == 1)
+    #expect(fixed.first?.status == .ready)
+}
+
+@Test func missingCoreNamesIt() {
+    let root = tempDir()
+    touch(root, "n64/game.z64")
+    let items = Scanner(installed: installed(cores: []), hasher: PathHasher(byFile: [:]))
+        .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:])
+    #expect(items.first?.status == .noEmulator("In RetroArch, open Online Updater → Core Downloader and get mupen64plus_next."))
+}
+
+@Test func shortcutLaunchOptions() {
+    let inst = installed(cores: ["snes9x"])
+    let item = ScanItem(romPath: "/r/snes/Super Mario World (USA).sfc", title: "Super Mario World", consoleId: 3, emulator: .retroarch,
+                        coreFile: inst.coresDirectory.appendingPathComponent("snes9x_libretro.dylib").path, status: .ready)
+    let s = Scanner.shortcut(for: item, installed: inst)
+    // Steam on macOS launches games as x86_64; arch -arm64 keeps emulators native so arm64 cores load.
+    #expect(s.exe == "\"/usr/bin/arch\"")
+    #expect(s.launchOptions == "-arm64 \"/A/RetroArch\" -L \"\(inst.coresDirectory.path)/snes9x_libretro.dylib\" \"/r/snes/Super Mario World (USA).sfc\"")
+    #expect(s.bundle == "/A/RetroArch")
+    #expect(s.name == "Super Mario World")
+}

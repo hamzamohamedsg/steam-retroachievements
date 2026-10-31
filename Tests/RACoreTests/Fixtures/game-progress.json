@@ -1,0 +1,11 @@
+{
+  "ID": 1, "Title": "Sonic the Hedgehog", "ConsoleID": 1, "ForumTopicID": 112, "Flags": null,
+  "ImageIcon": "/Images/067895.png", "ImageTitle": "/Images/054993.png", "ImageIngame": "/Images/000010.png", "ImageBoxArt": "/Images/051872.png",
+  "Publisher": "Sega", "Developer": "", "Genre": null, "Released": "1992-06-02 00:00:00", "ReleasedAtGranularity": "day",
+  "ConsoleName": "Mega Drive", "ParentGameID": null, "NumDistinctPlayers": 27080, "NumAchievements": 2,
+  "Achievements": {
+    "10": {"ID": 10, "NumAwarded": 9000, "NumAwardedHardcore": 4000, "Title": "Bonus Stage", "Description": "Enter a special stage", "Points": 5, "TrueRatio": 6, "Author": "Scott", "DateModified": "2023-08-08 00:36:59", "DateCreated": "2012-11-02 00:03:12", "BadgeName": "250337", "DisplayOrder": 2, "MemAddr": "x", "type": null},
+    "9": {"ID": 9, "NumAwarded": 24273, "NumAwardedHardcore": 10831, "Title": "That Was Easy", "Description": "Complete the first act in Green Hill Zone", "Points": 3, "TrueRatio": 3, "Author": "Scott", "DateModified": "2023-08-08 00:36:59", "DateCreated": "2012-11-02 00:03:12", "BadgeName": "250336", "DisplayOrder": 1, "MemAddr": "y", "type": "progression", "DateEarnedHardcore": "2016-03-12 17:47:29", "DateEarned": "2016-03-12 17:47:29"}
+  },
+  "NumAwardedToUser": 1, "NumAwardedToUserHardcore": 1, "UserCompletion": "50.00%", "UserCompletionHardcore": "50.00%"
+}
