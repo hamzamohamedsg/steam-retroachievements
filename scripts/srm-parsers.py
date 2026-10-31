@@ -9,6 +9,7 @@ import json, os, random, time
 HOME = os.path.expanduser("~")
 CORES = f"{HOME}/Library/Application Support/RetroArch/cores"
 RETROARCH = "/Applications/RetroArch.app/Contents/MacOS/RetroArch"
+ART = ["tall", "long", "hero", "logo", "icon"]
 OUT = f"{HOME}/Library/Application Support/steam-rom-manager/userData/userConfigurations.json"
 
 # shortcut: disc games listed as both .m3u and .cue show up twice; delete the extra one in SRM's preview.
@@ -108,6 +109,13 @@ def parser(name, folders, cores, exts):
         "fuzzyMatch": {"removeCharacters": True, "removeBrackets": True, "replaceDiacritics": True},
         "onlineImageQueries": ["${fuzzyTitle}"], "imagePool": "${fuzzyTitle}",
         "imageProviders": ["sgdb"], "disabled": False, "group": "",
+        # SRM's command line doesn't fill schema defaults, so every field it reads must be present.
+        **{k: dict.fromkeys(ART) for k in ("defaultImage", "localImages", "overlayImages")},
+        "imageProviderAPIs": {"sgdb": {"nsfw": False, "humor": False, "styles": [], "stylesHero": [], "stylesLogo": [],
+                                       "stylesIcon": [], "imageMotionTypes": ["static"], "sizes": [], "sizesHero": [], "sizesIcon": []}},
+        "titleFromVariable": {"limitToGroups": [], "skipFileIfVariableWasNotFound": False, "caseInsensitiveVariables": False},
+        "sortAsFromVariable": {"limitToGroups": []},
+        "drmProtect": False, "steamInputEnabled": "1", "controllers": {},
     }
 
 
