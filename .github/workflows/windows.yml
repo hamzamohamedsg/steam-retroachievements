@@ -1,0 +1,62 @@
+# Builds the Windows program (no Mac can) and attaches it to a release:
+# automatically when a release is published, or by hand for an existing tag.
+name: Windows build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the zip to (leave empty to only build)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+
+      - uses: compnerd/gha-setup-swift@v0.5.1
+        with:
+          swift-version: swift-6.3-release
+          swift-build: 6.3-RELEASE
+
+      # rc.exe (for the icon) comes with the Windows SDK; this puts it on PATH.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        shell: pwsh
+        run: |
+          rc.exe /fo AppIcon.res Resources\AppIcon.rc
+          swift build -c release --product SteamRetroAchievements `
+            -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup -Xlinker AppIcon.res
+
+      # The Swift runtime and Microsoft C++ runtime DLLs go next to the .exe, so nothing else needs installing.
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "steam-retroachievements-windows"
+          New-Item -ItemType Directory $out | Out-Null
+          Copy-Item .build\release\SteamRetroAchievements.exe, steam\inject.js $out
+          $runtime = Split-Path (Get-Command swiftCore.dll).Source
+          Copy-Item "$runtime\*.dll" $out
+          Copy-Item "$env:SystemRoot\System32\vcruntime140.dll", "$env:SystemRoot\System32\vcruntime140_1.dll", "$env:SystemRoot\System32\msvcp140.dll" $out
+          Compress-Archive -Path $out -DestinationPath "$out.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steam-retroachievements-windows
+          path: steam-retroachievements-windows.zip
+
+      - name: Attach to release
+        if: github.event.release.tag_name || inputs.tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name || inputs.tag }}" steam-retroachievements-windows.zip --clobber --repo "${{ github.repository }}"
