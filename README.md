@@ -27,7 +27,7 @@ Keep your ROMs in the `ROMs` folder in your home folder (`~/ROMs`). macOS stops 
 You can add games any of these ways:
 
 - **Add Games window:** from the menu bar icon, or the **Add Games** button next to Steam's own "Add a Game". It scans a folder, using one subfolder per console (`snes`, `psx`, `gba`, …), picks an installed emulator for each game, and adds the games to Steam in one go.
-- **Steam ROM Manager:** shortcuts it creates work as they are.
+- **Steam ROM Manager:** shortcuts it creates work as they are. With Steam ROM Manager closed, `scripts/srm-parsers.py` sets it up with one parser per console, reading the same `~/ROMs/<console>` folders and pulling artwork from SteamGridDB. Re-run it after downloading new RetroArch cores.
 - **Steam's "Add a Non-Steam Game":** pick the emulator app, then open the shortcut's **Properties**:
   - Set **Target** to `"/usr/bin/arch"`. Steam on macOS starts games as Intel apps, which can't load Apple Silicon cores; `arch -arm64` keeps the emulator native.
   - Set **Launch Options** to `-arm64 "<emulator executable>"` followed by the emulator's arguments:
