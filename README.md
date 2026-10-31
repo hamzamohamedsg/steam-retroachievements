@@ -6,7 +6,7 @@ An app for macOS, Linux and Windows that shows your [RetroAchievements](https://
 
 It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (GameCube/Wii), Flycast (Dreamcast), and SkyEmu (Game Boy family). On macOS it's a menu bar app; on Linux and Windows it's a background program with no window. Signing in and adding games happen inside Steam on every platform.
 
-> Linux and Windows support is new. The Linux build compiles but hasn't been run on a Linux machine yet, and the Windows build hasn't been compiled at all.
+> Linux and Windows support is new: both are built, but neither has been run on a Linux or Windows machine yet.
 
 ## How it works
 
@@ -22,7 +22,7 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 1. Start the app:
    - **macOS:** open **Steam RetroAchievements** from your Applications folder.
    - **Linux:** unpack `steam-retroachievements-linux.tar.gz` and run `./steam-retroachievements` from a terminal. Keep `inject.js` and `icon.png` next to it. On a Steam Deck, do this in Desktop Mode. The first run also adds **Steam RetroAchievements** to your app menu, so after that you can start it from there.
-   - **Windows:** run `SteamRetroAchievements.exe`, with `inject.js` in the same folder.
+   - **Windows:** unzip `steam-retroachievements-windows.zip` from the [latest release](../../releases/latest) and run `SteamRetroAchievements.exe`. It has no window; keep all the files in the folder together. If SmartScreen warns, choose **More info → Run anyway** (the program isn't signed).
 2. Restart Steam if asked. Steam only reads the developer switch when it starts. On macOS, the menu bar shows **Restart Steam to finish setup** with a button. On Linux the terminal and the log say so, on Windows the log; quit Steam and open it again yourself.
 3. When Steam connects, a **Steam RetroAchievements** dialog opens in Steam's library. Enter your RetroAchievements username and Web API key; the key is on [retroachievements.org/settings](https://retroachievements.org/settings). Click **Sign In**. Signing in also turns on **Open at login**: a login item on macOS, a systemd user service on Linux (it runs in Steam Deck's Game Mode too), a Run registry entry on Windows.
 4. Sign in to RetroAchievements inside each emulator you play with. The emulator is what unlocks achievements; this app only shows them.
@@ -86,7 +86,7 @@ node scripts/steam-eval.mjs 'MainWindowBrowserManager.m_lastLocation'   # poke a
 
 `build-linux.sh` needs the swift.org toolchain from [swiftly](https://www.swift.org/install/macos/) and the matching Static Linux SDK (`swift sdk install <bundle URL> --checksum <sum>`, both listed on swift.org). For ARM Linux, run it with `SDK=aarch64-swift-linux-musl`.
 
-**Windows:** build on Windows with the Swift toolchain. The linker flags make it a windowless program, so no console opens at login:
+**Windows:** `.github/workflows/windows.yml` builds the zip on GitHub's Windows machines and attaches it to each published release (or run it by hand with a tag). To build on Windows yourself with the Swift toolchain: The linker flags make it a windowless program, so no console opens at login:
 
 ```bash
 rc.exe /fo .build\AppIcon.res Resources\AppIcon.rc
