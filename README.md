@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="128" alt="">
+
 # Steam RetroAchievements
 
 An app for macOS, Linux and Windows that shows your [RetroAchievements](https://retroachievements.org) inside the Steam client. Open a retro game's page in your Steam library and you see its achievements, your progress, and the game's details, styled like Steam's own achievements. It works in the normal desktop library and in Big Picture mode.

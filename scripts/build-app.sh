@@ -8,7 +8,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/SteamRetroAchievements "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
-cp steam/inject.js "$APP/Contents/Resources/"
+cp steam/inject.js Resources/AppIcon.icns "$APP/Contents/Resources/"
 codesign --force --sign - "$APP"
 osascript -e 'quit app id "local.steam-retroachievements"' 2>/dev/null || true
 sleep 1
