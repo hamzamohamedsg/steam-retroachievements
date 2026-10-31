@@ -37,7 +37,7 @@ enum Tray {
             Shell_NotifyIconW(DWORD(NIM_ADD), &nid)
 
             var msg = MSG()
-            while GetMessageW(&msg, nil, 0, 0) > 0 {
+            while GetMessageW(&msg, nil, 0, 0) {  // Swift imports BOOL as a Bool, so -1 (error) also continues
                 TranslateMessage(&msg)
                 DispatchMessageW(&msg)
             }
@@ -53,6 +53,11 @@ enum Tray {
     }
 
     private static func handle(_ hwnd: HWND?, _ msg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
+        if msg == UINT(WM_COMMAND), Int(wParam & 0xFFFF) == quitCommand {
+            var nid = notifyData(hwnd)
+            Shell_NotifyIconW(DWORD(NIM_DELETE), &nid)
+            exit(0)
+        }
         guard msg == callbackMessage else { return DefWindowProcW(hwnd, msg, wParam, lParam) }
         let mouse = UINT(lParam & 0xFFFF)
         if mouse == UINT(WM_RBUTTONUP) || mouse == UINT(WM_LBUTTONUP) { showMenu(hwnd) }
@@ -67,12 +72,9 @@ enum Tray {
         var point = POINT()
         GetCursorPos(&point)
         SetForegroundWindow(hwnd)  // otherwise the menu doesn't close when clicking elsewhere
-        let command = TrackPopupMenu(menu, UINT(TPM_RETURNCMD | TPM_RIGHTBUTTON), point.x, point.y, 0, hwnd, nil)
+        // The chosen item arrives as WM_COMMAND (TPM_RETURNCMD's id would be lost: Swift imports the BOOL result as a Bool).
+        TrackPopupMenu(menu, UINT(TPM_RIGHTBUTTON), point.x, point.y, 0, hwnd, nil)
         DestroyMenu(menu)
-        guard Int(command) == quitCommand else { return }
-        var nid = notifyData(hwnd)
-        Shell_NotifyIconW(DWORD(NIM_DELETE), &nid)
-        exit(0)
     }
 }
 #endif

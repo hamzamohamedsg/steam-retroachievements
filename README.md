@@ -4,7 +4,7 @@
 
 An app for macOS, Linux and Windows that shows your [RetroAchievements](https://retroachievements.org) inside the Steam client. Open a retro game's page in your Steam library and you see its achievements, your progress, and the game's details, styled like Steam's own achievements. It works in the normal desktop library and in Big Picture mode.
 
-It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (GameCube/Wii), Flycast (Dreamcast), and SkyEmu (Game Boy family). On macOS it's a menu bar app; on Linux and Windows it's a background program with no window. Signing in and adding games happen inside Steam on every platform.
+It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (GameCube/Wii), Flycast (Dreamcast), and SkyEmu (Game Boy family). On macOS it's a menu bar app, on Windows a tray icon, and on Linux a background program with no window. Signing in and adding games happen inside Steam on every platform.
 
 > Linux and Windows support is new: both are built, but neither has been run on a Linux or Windows machine yet.
 
@@ -22,8 +22,8 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 1. Start the app:
    - **macOS:** open **Steam RetroAchievements** from your Applications folder.
    - **Linux:** unpack `steam-retroachievements-linux.tar.gz` and run `./steam-retroachievements` from a terminal. Keep `inject.js` and `icon.png` next to it. On a Steam Deck, do this in Desktop Mode. The first run also adds **Steam RetroAchievements** to your app menu, so after that you can start it from there.
-   - **Windows:** unzip `steam-retroachievements-windows.zip` from the [latest release](../../releases/latest) and run `SteamRetroAchievements.exe`. It has no window; keep all the files in the folder together. If SmartScreen warns, choose **More info → Run anyway** (the program isn't signed).
-2. Restart Steam if asked. Steam only reads the developer switch when it starts. On macOS, the menu bar shows **Restart Steam to finish setup** with a button. On Linux the terminal and the log say so, on Windows the log; quit Steam and open it again yourself.
+   - **Windows:** unzip `steam-retroachievements-windows.zip` from the [latest release](../../releases/latest) and run `SteamRetroAchievements.exe`. It shows a trophy in the notification area (the tray); click it to see the status or quit. Keep all the files in the folder together. If SmartScreen warns, choose **More info → Run anyway** (the program isn't signed).
+2. Restart Steam if asked. Steam only reads the developer switch when it starts. On macOS, the menu bar shows **Restart Steam to finish setup** with a button. On Windows the tray menu says so, on Linux the terminal; quit Steam and open it again yourself.
 3. When Steam connects, a **Steam RetroAchievements** dialog opens in Steam's library. Enter your RetroAchievements username and Web API key; the key is on [retroachievements.org/settings](https://retroachievements.org/settings). Click **Sign In**. Signing in also turns on **Open at login**: a login item on macOS, a systemd user service on Linux (it runs in Steam Deck's Game Mode too), a Run registry entry on Windows.
 4. Sign in to RetroAchievements inside each emulator you play with. The emulator is what unlocks achievements; this app only shows them.
 
