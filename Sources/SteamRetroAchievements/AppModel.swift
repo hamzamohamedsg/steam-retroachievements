@@ -55,6 +55,9 @@ import SteamBridge
             guard let self else { return }
             steamState = state
             Log.info(statusText)
+            #if os(Windows)
+            Tray.status.withLock { $0 = statusText }
+            #endif
             // First run: put the sign-in dialog in front of the user as soon as Steam can show it.
             if state == .connected, credentials == nil { Task { await self.run("window.__sra.openSettings()") } }
         }

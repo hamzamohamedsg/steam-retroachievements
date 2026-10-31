@@ -55,10 +55,13 @@ struct MenuContent: View {
     }
 }
 #else
-/// Linux and Windows: no menu bar, just the background program. Status goes to the terminal and the log.
+/// Linux and Windows: no menu bar, just the background program. Status goes to the terminal (Linux), the tray (Windows) and the log.
 @main
 enum Headless {
     @MainActor static func main() async {
+        #if os(Windows)
+        Tray.start()
+        #endif
         AppModel.shared.launch()
         while true { try? await Task.sleep(for: .seconds(3600)) }
     }
