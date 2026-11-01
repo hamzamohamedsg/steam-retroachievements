@@ -57,7 +57,7 @@ public actor Matcher {
 
         let keys = Set([Titles.key(Titles.clean(rom)), Titles.key(Titles.clean(s.name))].filter { !$0.isEmpty })
         for console in state.consoles {
-            let hits = try await ra.gameList(consoleId: console).filter { keys.contains(Titles.key($0.title)) }
+            let hits = try await ra.gameList(consoleId: console).filter { keys.contains(Titles.key($0.title)) && Titles.subsetName($0.title) == nil }
             if let best = hits.min(by: { ($0.numAchievements == 0 ? 1 : 0, $0.id) < ($1.numAchievements == 0 ? 1 : 0, $1.id) }) {
                 save(rom, best.id, console, manual: false, state)
                 return .matched(gameId: best.id, consoleId: console, verification: state.base)
@@ -80,6 +80,17 @@ public actor Matcher {
             .filter { key.isEmpty || Titles.key($0.title).contains(key) }
             .sorted { ($0.numAchievements == 0 ? 1 : 0, $0.title) < ($1.numAchievements == 0 ? 1 : 0, $1.title) }
             .prefix(50))
+    }
+
+    /// The game and its subsets (same title with a `[Subset - Name]` tag), base first. Empty when there are no subsets.
+    public func sets(gameId: Int, consoleId: Int) async throws -> [PanelPayload.SetRef] {
+        let list = try await ra.gameList(consoleId: consoleId)
+        guard let base = list.first(where: { $0.id == gameId }), Titles.subsetName(base.title) == nil else { return [] }
+        let key = Titles.key(base.title)
+        let subsets = list.compactMap { e in
+            Titles.subsetName(e.title).flatMap { Titles.key(e.title) == key ? PanelPayload.SetRef(id: e.id, name: $0) : nil }
+        }.sorted { ($0.name, $0.id) < ($1.name, $1.id) }
+        return subsets.isEmpty ? [] : [.init(id: gameId, name: "Base Set")] + subsets
     }
 
     /// Hash, base verification and candidate consoles; the stored hash is reused while the file is unchanged.

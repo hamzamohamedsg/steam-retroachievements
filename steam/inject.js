@@ -127,6 +127,8 @@
   .sra-actions { display: flex; gap: 14px; margin: 8px 0; align-items: center; }
   .sra-btn { background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; border-radius: 2px; padding: 6px 12px; font: inherit; cursor: pointer; }
   .sra-btn:hover { background: #1a9fff; }
+  .sra-sets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .sra-sets .sra-btn.sra-active { background: #1a9fff; cursor: default; }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
@@ -286,8 +288,19 @@
     if (locked.length) rows.push(iconRow(doc, "Locked Achievements", locked, false, unlocked.length > 0, p));
     const body = s && el(doc, "div", { class: c(D, "Body") }, rows,
       el(doc, "button", { class: c(K.button(), "AppDetailsButton", "BottomRight") + " " + steamButton, onclick: () => openAll(p) }, "View My Achievements"));
-    return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], highlight, body);
+    return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], highlight, setSwitcher(doc, p), body);
   };
+
+  // Base game and its subsets (RetroAchievements lists each subset as its own game).
+  const setSwitcher = (doc, p) => p.sets?.length > 1 && el(doc, "div", { class: "sra-sets" }, p.sets.map((set) =>
+    el(doc, "button", { class: "sra-btn" + (set.id === p.game?.id ? " sra-active" : ""), onclick: () => pickSet(set.id) }, set.name)));
+  const pickSet = safe(async (gameId) => {
+    const appid = current?.appid;
+    if (!current?.shortcut || gameId === current.payload?.game?.id) return;
+    let payload;
+    try { payload = await call("getSet", { shortcut: current.shortcut, gameId }); } catch (e) { log("error", e?.message ?? e); return; }
+    if (current?.appid === appid) render(payload);
+  });
 
   // Replaces Steam's "detailed information is unavailable" box on the left.
   const detailsSection = (doc, p) => {

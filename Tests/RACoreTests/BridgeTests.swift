@@ -71,3 +71,26 @@ struct EchoHandler: BridgeHandling {
     #expect(items.last?["shortcut"] == nil)
     #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }
+
+@Test func getSetShowsTheSubset() async throws {
+    let data = tempDir()
+    let services = Services(credentials: creds, dataDirectory: data, transport: FakeTransport { _ in (Data(), 500) })
+    let cache = DiskCache(directory: data.appendingPathComponent("cache"))
+    cache.put("gamelist-7", [smbEntry, bonusEntry])
+    cache.put("progress-1446", progress([ach(1, order: 1)]))
+    var bonus = progress([ach(2, order: 1), ach(3, order: 2)]); bonus.id = 900; bonus.title = bonusEntry.title
+    cache.put("progress-900", bonus)
+    let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
+    func panel(_ method: String, _ params: [String: Any]) async throws -> PanelPayload {
+        let body = try JSONSerialization.data(withJSONObject: params.merging(["shortcut": try JSONSerialization.jsonObject(with: JSONEncoder().encode(smb()))]) { $1 })
+        return try JSONDecoder().decode(PanelPayload.self, from: try await handler.handle(method: method, params: body))
+    }
+    let base = try await panel("getPanel", [:])
+    #expect(base.game?.id == 1446)
+    #expect(base.sets.map(\.id) == [1446, 900])
+    let set = try await panel("getSet", ["gameId": 900])
+    #expect(set.game?.id == 900)
+    #expect(set.achievements.count == 2)
+    #expect(set.sets.map(\.id) == [1446, 900])
+    #expect(try await panel("getSet", ["gameId": 12345]).game?.id == 1446)  // not one of this game's sets: the base game
+}

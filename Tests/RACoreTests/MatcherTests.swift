@@ -89,3 +89,25 @@ final class CountingHasher: Fingerprinting, @unchecked Sendable {
     #expect(try await m.resolve(smb(rom)) == .matched(gameId: 1446, consoleId: 7, verification: .verified))
     #expect(hasher.allCalls + hasher.oneCalls == 1)
 }
+
+let bonusEntry = RAGameListEntry(id: 900, title: "Super Mario Bros. [Subset - Bonus]", consoleId: 7, consoleName: "NES/Famicom", imageIcon: "", numAchievements: 12, hashes: [])
+
+@Test func parsesSubsetNames() {
+    #expect(Titles.subsetName("Sonic the Hedgehog [Subset - Bonus]") == "Bonus")
+    #expect(Titles.subsetName("Sonic the Hedgehog") == nil)
+    #expect(Titles.subsetName("~Hack~ Sonic [Subset - Time Attack] (Beta)") == "Time Attack")
+}
+
+@Test func nameMatchSkipsSubsets() async throws {
+    var early = bonusEntry; early.id = 5  // lower id and achievements: would win the tie-break if subsets weren't excluded
+    #expect(try await matcher(.hash("zzz"), lists: [7: [early, smbEntry]]).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .unrecognizedHash))
+}
+
+@Test func listsSubsetsOfTheGame() async throws {
+    let other = RAGameListEntry(id: 901, title: "Other Game [Subset - Bonus]", consoleId: 7, consoleName: "", imageIcon: "", numAchievements: 3, hashes: [])
+    let m = matcher(.hash("abc"), lists: [7: [smbEntry, bonusEntry, other]])
+    #expect(try await m.sets(gameId: 1446, consoleId: 7).map(\.name) == ["Base Set", "Bonus"])
+    #expect(try await m.sets(gameId: 1446, consoleId: 7).map(\.id) == [1446, 900])
+    #expect(try await m.sets(gameId: 900, consoleId: 7).isEmpty)  // asking about a subset itself
+    #expect(try await matcher(.hash("abc")).sets(gameId: 1446, consoleId: 7).isEmpty)  // no subsets
+}

@@ -14,6 +14,12 @@ public enum Titles {
         return s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
+    /// "Bonus" for RA's `Sonic the Hedgehog [Subset - Bonus]`; nil for a base game.
+    public static func subsetName(_ title: String) -> String? {
+        guard let r = title.range(of: #"\[Subset - ([^\]]+)\]"#, options: .regularExpression) else { return nil }
+        return String(title[r].dropFirst("[Subset - ".count).dropLast())
+    }
+
     /// A matching key that ignores case, accents, punctuation, RA's `~Tag~` prefixes and a leading/trailing "The".
     public static func key(_ title: String) -> String {
         var s = title.lowercased().folding(options: .diacriticInsensitive, locale: nil)
