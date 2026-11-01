@@ -3,8 +3,6 @@
 name: Linux build
 
 on:
-  push:
-    branches: [unix-ci]
   release:
     types: [published]
   workflow_dispatch:
