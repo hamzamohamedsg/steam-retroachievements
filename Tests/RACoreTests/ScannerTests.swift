@@ -31,7 +31,8 @@ func installed(cores: [String]) -> Installed {
     let smw = items.first { $0.title == "Super Mario World" }, gbc = items.first { $0.title == "game" }, ff7 = items.first { $0.title == "FF7" }
     #expect(smw?.consoleId == 3 && smw?.emulator == .retroarch && smw?.status == .ready)
     #expect(smw?.coreFile?.hasSuffix("/snes9x_libretro.\(Installed.coreExtension)") == true)
-    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.\(Installed.coreExtension)") == true)
+    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.\(Installed.coreExtension)") == true,
+            "gbc: \(String(describing: gbc)); root: \(root.path); items: \(items.map(\.romPath))")
     #expect(ff7?.consoleId == 12 && ff7?.emulator == .duckstation && ff7?.status == .ready)
 }
 
