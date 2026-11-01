@@ -11,7 +11,12 @@ struct PathHasher: Fingerprinting {
 func touch(_ root: URL, _ rel: String) {
     let url = root.appendingPathComponent(rel)
     try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    FileManager.default.createFile(atPath: url.path, contents: Data([0]))
+    // Retry: on Windows a just-created file can be briefly locked (virus scanner), and a failed create would otherwise go unnoticed.
+    var failure: Error?
+    for _ in 0..<40 where !FileManager.default.fileExists(atPath: url.path) {
+        do { try Data([0]).write(to: url) } catch { failure = error; Thread.sleep(forTimeInterval: 0.05) }
+    }
+    precondition(FileManager.default.fileExists(atPath: url.path), "could not create \(url.path): \(String(describing: failure))")
 }
 
 func installed(cores: [String]) -> Installed {
