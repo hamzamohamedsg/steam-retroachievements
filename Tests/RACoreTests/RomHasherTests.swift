@@ -50,9 +50,10 @@ import Testing
     #expect(RomHasher().fingerprint(romPath: tempDir().appendingPathComponent("nope.nes").path, consoleId: 7) == .unreadable(.missing))
 }
 
-// Windows ignores POSIX permission bits, so a file can't be made unreadable this way there.
+// Windows ignores POSIX permission bits, and root (as in a CI container) reads files regardless of them.
 #if !os(Windows)
-@Test func unreadableFileIsBlocked() throws {
+@Test(.enabled(if: geteuid() != 0, "root ignores file permissions"))
+func unreadableFileIsBlocked() throws {
     let url = writeNES(tempDir())
     try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
     #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 7) == .unreadable(.blocked))
