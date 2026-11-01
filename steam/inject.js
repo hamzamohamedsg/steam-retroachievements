@@ -236,7 +236,28 @@
   };
   const hideCard = () => { hoverCard?.remove(); hoverCard = null; };
 
+  // Big Picture's controller navigation only reaches elements registered in Steam's focus tree (what its own Focusable component does):
+  // a node under the nearest registered ancestor, then the element. A failure just leaves the buttons mouse/touch-only.
+  let navCleanups = [];
+  const registerNav = (doc, root, buttons) => {
+    try {
+      const context = FocusNavController.m_rgAllContexts.find((x) => x.m_rootWindow === doc.defaultView);
+      const deepest = (node) => node.m_rgChildren.reduce((best, ch) => deepest(ch) ?? best, node.m_element?.contains(root) ? node : null);
+      let parent = null;
+      for (const tree of context?.m_rgGamepadNavigationTrees ?? []) parent = deepest(tree.m_Root) ?? parent;
+      if (!parent) return [];
+      return buttons.map((button) => {
+        const node = parent.Tree.CreateNode(parent, undefined);
+        node.SetProperties({ focusable: "self", onOKButton: () => button.click(), onOKActionDescription: button.title });
+        navCleanups.push(parent.Tree.RegisterNavigationItem(node, button));
+        return node;
+      });
+    } catch (e) { log("error", `controller focus unavailable: ${e?.message ?? e}`); return []; }
+  };
+
   const removePanel = () => {
+    navCleanups.forEach((fn) => { try { fn(); } catch (_) {} });
+    navCleanups = [];
     hideCard();
     const doc = steamUI.doc();
     doc?.querySelectorAll("[data-sra-panel]").forEach((n) => n.remove());
@@ -360,7 +381,13 @@
     const host = steamUI.panelHost(doc, current.bpm);
     if (!host) return;
     ensureStyle(doc);
-    if (current.bpm) return current.nodes.push(host.insertBefore(bpmBlock(doc, payload), host.firstChild));
+    if (current.bpm) {
+      const block = host.insertBefore(bpmBlock(doc, payload), host.firstChild);
+      current.nodes.push(block);
+      const focusNodes = registerNav(doc, block, [...block.querySelectorAll(".sra-set")]);
+      if (current.refocus != null) { focusNodes[current.refocus]?.BTakeFocus?.(); current.refocus = null; }  // the click rebuilt the buttons
+      return;
+    }
 
     const p = payload, main = p.game ? achievementsSection(doc, p) : messageSection(doc, p);
     host.prepend(main);
@@ -411,7 +438,7 @@
       kids.push(el(doc, "div", { class: "sra-sets" }, sets.map((set, i) => {
         const name = i ? subsetName(set) : "Base game";
         return el(doc, "button", { class: "sra-set Focusable" + (i === at ? " sra-active" : ""), type: "button", tabindex: "0", title: name,
-          onclick: () => { current.bpmSet = i; render(current.payload); } },
+          onclick: () => { current.bpmSet = i; current.refocus = i; render(current.payload); } },
           el(doc, "img", { src: set.game.iconURL, alt: "" }), el(doc, "span", {}, name));
       })));
     }
