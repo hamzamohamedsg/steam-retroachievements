@@ -2,15 +2,19 @@
 
 # Steam RetroAchievements
 
-An app for macOS, Linux and Windows that shows your [RetroAchievements](https://retroachievements.org) inside the Steam client. Open a retro game's page in your Steam library and you see its achievements, your progress, and the game's details, styled like Steam's own achievements. It works in the normal desktop library and in Big Picture mode.
+An app for macOS, Linux and Windows that shows your [RetroAchievements](https://retroachievements.org) inside the Steam client. Open a retro game's page in your Steam library and you see its achievements, your progress and your unlocks in the activity feed, styled like a Steam game's. The game's details open from the (i) button, like a Steam game's. It works in the normal desktop library and in Big Picture mode, where the controller moves through it like any Steam game.
 
 It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (GameCube/Wii), Flycast (Dreamcast), and SkyEmu (Game Boy family). On macOS it's a menu bar app, on Windows a tray icon, and on Linux a background program with no window. Signing in and adding games happen inside Steam on every platform.
 
-![A ROM's page in Steam's library: the game's details on the left, RetroAchievements progress on the right](docs/screenshots/rom-page.png)
+![A ROM's page in Steam's library: the game's details open under the (i) button, the activity feed on the left, RetroAchievements progress on the right](docs/screenshots/rom-page.png)
 
-| Achievements page | Big Picture mode | Add Games |
-|---|---|---|
-| ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The same game in Big Picture mode](docs/screenshots/big-picture.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
+| Big Picture: Your Stuff | Big Picture: Activity |
+|---|---|
+| ![The game's achievements in Big Picture mode, the focused one showing its name, description and rarity](docs/screenshots/big-picture.png) | ![Unlocks in Big Picture mode's activity feed, grouped by day](docs/screenshots/big-picture-activity.png) |
+
+| Achievements page | Add Games |
+|---|---|
+| ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
 
 ## How it works
 
@@ -64,8 +68,8 @@ A shortcut with no ROM in its launch options just opens the emulator's menu, so 
 
 - **"Couldn't check this ROM version":** the app can't fingerprint `.chd` or `.7z` files yet. It matched the game by name. Your emulator can still unlock achievements.
 - **"RetroAchievements doesn't recognize this ROM version":** this exact ROM isn't one RetroAchievements supports, so the emulator won't unlock achievements for it.
-- **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one to open that subset's achievements page. Subsets are separate from the game's own list and totals.
-- **Wrong game:** click **Wrong game?** on the panel and pick the right one. The app remembers your choice.
+- **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one (in Big Picture, press A on it) to open that subset's achievements page. Subsets are separate from the game's own list and totals.
+- **Wrong game:** in the desktop library, click the (i) button next to the heart, then **Wrong game?**, and pick the right one. The app remembers your choice.
 - **Panel gone after a Steam update:** restart Steam (macOS: **Restart Steam** in the menu bar). If it's still missing, Steam changed something inside and the app needs an update.
 - **Log file:** `~/Library/Logs/steam-retroachievements.log` on macOS, `~/.local/share/steam-retroachievements/steam-retroachievements.log` on Linux, `%LOCALAPPDATA%\steam-retroachievements\steam-retroachievements.log` on Windows.
 

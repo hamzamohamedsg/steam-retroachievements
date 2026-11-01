@@ -3,7 +3,7 @@ import Foundation
 /// Asks GitHub for the latest release. Never throws: no network, rate limits and odd replies all mean "no update".
 public enum UpdateChecker {
     /// Keep in step with CFBundleShortVersionString in Resources/Info.plist (UpdateCheckerTests checks).
-    public static let currentVersion = "0.1.4"
+    public static let currentVersion = "0.1.5"
 
     /// The release page when a newer version than `current` is out, otherwise nil.
     public static func newerRelease(current: String = currentVersion, transport: HTTPTransport = URLSessionTransport()) async -> (version: String, page: URL)? {
