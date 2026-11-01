@@ -132,7 +132,8 @@
   .sra-set { display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.06); color: #fff; border: 2px solid transparent; border-radius: 4px; padding: 6px 12px 6px 6px; font: inherit; cursor: pointer; }
   .sra-set img { width: 48px; height: 48px; border-radius: 3px; }
   .sra-set.sra-active { border-color: #1a9fff; background: rgba(26, 159, 255, 0.2); }
-  .sra-set:focus-visible, .sra-set:hover { border-color: #67c1f5; outline: none; }
+  .sra-set:focus, .sra-set:hover { border-color: #67c1f5; outline: none; }
+  .sra-bpm .sra-row:focus { outline: 3px solid #67c1f5; background: rgba(103, 193, 245, 0.18); }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
@@ -248,7 +249,9 @@
       if (!parent) return [];
       return buttons.map((button) => {
         const node = parent.Tree.CreateNode(parent, undefined);
-        node.SetProperties({ focusable: "self", onOKButton: () => button.click(), onOKActionDescription: button.title });
+        node.SetProperties({ focusable: "self", onOKActionDescription: button.title });
+        // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
+        button.addEventListener("vgp_onok", () => button.click());
         navCleanups.push(parent.Tree.RegisterNavigationItem(node, button));
         return node;
       });
@@ -384,7 +387,7 @@
     if (current.bpm) {
       const block = host.insertBefore(bpmBlock(doc, payload), host.firstChild);
       current.nodes.push(block);
-      const focusNodes = registerNav(doc, block, [...block.querySelectorAll(".sra-set")]);
+      const focusNodes = registerNav(doc, block, [...block.querySelectorAll(".sra-set, .sra-row")]);
       if (current.refocus != null) { focusNodes[current.refocus]?.BTakeFocus?.(); current.refocus = null; }  // the click rebuilt the buttons
       return;
     }
@@ -414,9 +417,9 @@
       el(doc, "div", { class: "sra-muted" }, [summary.pointsText, summary.hardcoreText].filter(Boolean).join(" · "))];
   };
   const bpmRow = (doc, row) =>
-    el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : "") },
+    el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : ""), tabindex: "-1" },
       el(doc, "img", { src: row.badgeURL, alt: "" }),
-      el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description)),
+      el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description), row.rarityText && el(doc, "div", { class: "sra-muted" }, row.rarityText)),
       el(doc, "div", { class: "sra-row-side" }, `${row.points} points`, row.unlockedText && el(doc, "div", {}, row.unlockedText)));
 
   // Big Picture's game page shares one content area between its tabs (ACTIVITY, YOUR STUFF, COMMUNITY, GAME INFO); ours belongs on the first.
