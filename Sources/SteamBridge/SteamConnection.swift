@@ -13,7 +13,7 @@ public struct CDPTarget: Decodable, Equatable, Sendable {
 
 public enum SteamState: Equatable, Sendable { case steamNotRunning, needsRestart, connecting, connected }
 
-public enum SteamError: Error { case notConnected, evaluation(String) }
+public enum SteamError: Error { case notConnected, timedOut, evaluation(String) }
 
 /// CDP results are plain JSON objects; they never leave the main actor.
 struct JSONBox: @unchecked Sendable { let value: [String: Any] }
@@ -22,6 +22,8 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
 @MainActor public final class SteamConnection {
     nonisolated static let bundleID = "com.valvesoftware.steam"
     nonisolated static let listURL = URL(string: "http://127.0.0.1:8080/json")!
+    /// Seconds to wait for Steam to answer one DevTools command.
+    nonisolated static let callTimeout = 20.0
 
     public private(set) var state: SteamState = .steamNotRunning {
         didSet { if state != oldValue { onStateChange?(state) } }
@@ -130,10 +132,19 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         #endif
     }
 
+    /// A session of its own: on Windows a request's `timeoutInterval` isn't honoured for a refused connection (it took 60 s to fail),
+    /// so the timeouts are set on the session too, which keeps the "is Steam's port open" check quick.
+    private nonisolated static let probeSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2
+        config.timeoutIntervalForResource = 2
+        return URLSession(configuration: config)
+    }()
+
     private nonisolated static func fetchTargets() async -> [CDPTarget]? {
         var req = URLRequest(url: listURL, timeoutInterval: 2)
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return nil }
+        guard let (data, _) = try? await probeSession.data(for: req) else { return nil }
         return try? JSONDecoder().decode([CDPTarget].self, from: data)
     }
 
@@ -170,6 +181,11 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         let data = try JSONSerialization.data(withJSONObject: ["id": id, "method": method, "params": params])
         return try await withCheckedThrowingContinuation { (c: CheckedContinuation<JSONBox, Error>) in
             pending[id] = c
+            // A reply that never comes would leave this call, and the polling that waits on it, stuck for good.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Self.callTimeout))
+                self?.pending.removeValue(forKey: id)?.resume(throwing: SteamError.timedOut)
+            }
             socket.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
                 guard let error else { return }
                 Task { @MainActor in self?.pending.removeValue(forKey: id)?.resume(throwing: error) }

@@ -9,11 +9,19 @@ public protocol HTTPTransport: Sendable {
 }
 
 public struct URLSessionTransport: HTTPTransport {
+    // The timeouts are on the session as well: on Windows a request's own timeoutInterval isn't always honoured.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
+
     public init() {}
     public func get(_ url: URL) async throws -> (Data, Int) {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("steam-retroachievements/0.1", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 }

@@ -85,3 +85,22 @@ func installed(cores: [String]) -> Installed {
     // The shortcut reads back as the same emulator, core and ROM.
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/mesen_libretro.so", romPath: "/r/nes/a.nes"))
 }
+
+#if os(Windows)
+@Test func steamLibrariesComeFromLibraryFolders() throws {
+    let steam = tempDir()
+    try FileManager.default.createDirectory(at: steam.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
+    let vdf = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}\n"
+    try vdf.write(to: steam.appendingPathComponent("steamapps/libraryfolders.vdf"), atomically: true, encoding: .utf8)
+    let libs = Installed.steamLibraries(steamFolder: steam.path.replacingOccurrences(of: "/", with: "\\"))
+    #expect(libs.count == 3 && libs.last == "D:\\SteamLibrary")
+}
+
+@Test func windowsInstallDirsCoverSteamAndDolphin() {
+    let env = ["ProgramFiles": "C:\\Program Files", "ProgramFiles(x86)": "C:\\Program Files (x86)", "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local", "USERPROFILE": "C:\\Users\\u"]
+    let ra = Installed.windowsInstallDirs(for: .retroarch, env: env, steamLibraries: ["D:\\SteamLibrary"])
+    #expect(ra.contains("D:\\SteamLibrary\\steamapps\\common\\RetroArch") && ra.contains("C:\\RetroArch-Win64") && ra.contains("C:\\Program Files (x86)\\RetroArch"))
+    let dolphin = Installed.windowsInstallDirs(for: .dolphin, env: env, steamLibraries: [])
+    #expect(dolphin.contains("C:\\Program Files\\Dolphin-x64") && dolphin.contains("C:\\Users\\u\\scoop\\apps\\dolphin\\current"))
+}
+#endif

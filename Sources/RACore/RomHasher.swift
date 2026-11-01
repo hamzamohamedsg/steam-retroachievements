@@ -55,16 +55,28 @@ public struct RomHasher: Fingerprinting {
               let text = try? String(contentsOf: url, encoding: .utf8),
               let first = text.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) })
                 .first(where: { !$0.isEmpty && !$0.hasPrefix("#") }) else { return path }
-        return first.hasPrefix("/") ? first : url.deletingLastPathComponent().appendingPathComponent(first).path
+        #if os(Windows)
+        let entry = first.replacingOccurrences(of: "\\", with: "/")
+        let absolute = entry.hasPrefix("/") || entry.range(of: #"^[A-Za-z]:/"#, options: .regularExpression) != nil
+        #else
+        let entry = first, absolute = first.hasPrefix("/")
+        #endif
+        return absolute ? entry : url.deletingLastPathComponent().appendingPathComponent(entry).path
     }
 
     /// Missing, unreadable and v1-unsupported files never reach rcheevos.
     static func precheck(_ path: String) -> HashResult? {
+        #if os(Windows)
+        // The C runtime's open() reads the path in the ANSI code page, so a name like "Pokémon.nes" looks missing.
+        guard FileManager.default.fileExists(atPath: path) else { return .unreadable(.missing) }
+        guard FileManager.default.isReadableFile(atPath: path) else { return .unreadable(.blocked) }
+        #else
         let fd = open(path, O_RDONLY)
         if fd < 0 {
             return errno == ENOENT ? .unreadable(.missing) : (errno == EACCES || errno == EPERM ? .unreadable(.blocked) : .unsupportedFormat)
         }
         close(fd)
+        #endif
         return unsupportedExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased()) ? .unsupportedFormat : nil
     }
 
@@ -86,15 +98,26 @@ public struct RomHasher: Fingerprinting {
 
     // shortcut: hashes the first file in the zip; upgrade if multi-file zips show up
     static func firstZipEntry(_ path: String) -> (String, Data)? {
-        guard let list = unzip(["-Z1", path]), let name = String(data: list, encoding: .utf8)?
-            .split(separator: "\n").map(String.init).first(where: { !$0.hasSuffix("/") }),
-              let bytes = unzip(["-p", path, name]) else { return nil }
+        guard let list = unzip(list: path), let name = String(data: list, encoding: .utf8)?
+            .split(whereSeparator: \.isNewline).map(String.init).first(where: { !$0.hasSuffix("/") }),
+              let bytes = unzip(extract: name, from: path) else { return nil }
         return (name, bytes)
     }
 
-    private static func unzip(_ args: [String]) -> Data? {
+    // Windows has no unzip, but its built-in tar (bsdtar) reads zip files.
+    #if os(Windows)
+    private static let unzipTool = "C:\\Windows\\System32\\tar.exe"
+    private static func unzip(list path: String) -> Data? { run(["-tf", path]) }
+    private static func unzip(extract name: String, from path: String) -> Data? { run(["-xOf", path, name]) }
+    #else
+    private static let unzipTool = "/usr/bin/unzip"
+    private static func unzip(list path: String) -> Data? { run(["-Z1", path]) }
+    private static func unzip(extract name: String, from path: String) -> Data? { run(["-p", path, name]) }
+    #endif
+
+    private static func run(_ args: [String]) -> Data? {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        p.executableURL = URL(fileURLWithPath: unzipTool)
         p.arguments = args
         let out = Pipe()
         p.standardOutput = out

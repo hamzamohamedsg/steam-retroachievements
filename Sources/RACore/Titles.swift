@@ -19,7 +19,8 @@ public enum Titles {
         var s = title.lowercased().folding(options: .diacriticInsensitive, locale: nil)
         s = s.replacingOccurrences(of: #"~[^~]*~|\([^)]*\)|\[[^\]]*\]"#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: "&", with: " and ")
-        s = s.replacingOccurrences(of: ", the", with: "")
+        // "Legend of Zelda, The" and "Legend of Zelda, The: Ocarina", but not the ", the" inside "Breathe, theory".
+        s = s.replacingOccurrences(of: #",\s*the(?![a-z0-9])"#, with: "", options: .regularExpression)
         s = s.trimmingCharacters(in: .whitespaces)
         if s.hasPrefix("the ") { s.removeFirst(4) }
         return String(s.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))

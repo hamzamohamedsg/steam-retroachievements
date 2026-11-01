@@ -23,16 +23,26 @@ public final class MatchStore: @unchecked Sendable {
 
     public init(file: URL) {
         self.file = file
-        records = (try? JSONDecoder().decode([String: MatchRecord].self, from: Data(contentsOf: file))) ?? [:]
+        let saved = (try? JSONDecoder().decode([String: MatchRecord].self, from: Data(contentsOf: file))) ?? [:]
+        records = Dictionary(saved.map { (Self.key($0.key), $0.value) }) { a, _ in a }
+    }
+
+    /// Windows paths are case-insensitive and take either slash, so one ROM must not end up with two records.
+    static func key(_ path: String) -> String {
+        #if os(Windows)
+        path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        #else
+        path
+        #endif
     }
 
     public func record(romPath: String) -> MatchRecord? {
-        lock.withLock { records[romPath] }
+        lock.withLock { records[Self.key(romPath)] }
     }
 
     public func save(romPath: String, _ record: MatchRecord) {
         lock.withLock {
-            records[romPath] = record
+            records[Self.key(romPath)] = record
             try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? JSONEncoder().encode(records).write(to: file, options: .atomic)
         }

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import RACore
 
@@ -18,7 +19,7 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
 }
 
 @Test func parsesFlagsAndEscapes() {
-    let l = EmulatorLaunch.parse(exe: raExe, launchOptions: "--libretro=/c/fceumm_libretro.dylib /r/My\\ Game.nes")
+    let l = EmulatorLaunch.parse(exe: raExe, launchOptions: "--libretro=/c/fceumm_libretro.dylib /r/My\\ Game.nes", backslashEscapes: true)
     #expect(l?.coreFile == "/c/fceumm_libretro.dylib")
     #expect(l?.romPath == "/r/My Game.nes")
 }
@@ -54,6 +55,8 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(Titles.key("~Homebrew~ Tobu Tobu Girl") == Titles.key("Tobu Tobu Girl"))
     #expect(Titles.key("Sonic & Knuckles") == Titles.key("Sonic and Knuckles"))
     #expect(Titles.key("Pokémon Red") == "pokemonred")
+    #expect(Titles.key("Breathe, Theory Of Games") == "breathetheoryofgames")  // only a real ", The" is dropped
+    #expect(Titles.key("Legend of Zelda, The: Ocarina of Time") == Titles.key("The Legend of Zelda: Ocarina of Time"))
 }
 
 @Test func consoleLookups() {
@@ -84,3 +87,13 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(Consoles.forCore(file: w?.coreFile ?? "").map(\.id) == [3])
     #expect(Consoles.forCore(file: "/c/mgba_libretro.so").map(\.id) == [4, 5, 6])
 }
+
+#if os(Windows)
+@Test func matchStoreTreatsWindowsPathsAsOne() throws {
+    let file = tempDir().appendingPathComponent("matches.json")
+    let store = MatchStore(file: file)
+    store.save(romPath: "C:\\ROMs\\SNES\\Mario.sfc", MatchRecord(gameId: 1, consoleId: 3, manual: false, hash: "h", size: 1, modified: 2))
+    #expect(store.record(romPath: "c:/roms/snes/mario.sfc")?.gameId == 1)
+    #expect(MatchStore(file: file).record(romPath: "C:/ROMs/SNES/Mario.sfc")?.gameId == 1)
+}
+#endif

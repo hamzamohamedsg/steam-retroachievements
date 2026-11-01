@@ -30,6 +30,10 @@ jobs:
       # rc.exe (for the icon) comes with the Windows SDK; this puts it on PATH.
       - uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Test
+        shell: pwsh
+        run: swift test
+
       - name: Build
         shell: pwsh
         run: |

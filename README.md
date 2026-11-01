@@ -14,7 +14,7 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 - The app adds one small script to Steam's interface. The script draws the panel, and the app does everything else:
   - fingerprints your ROMs with RetroAchievements' own code (rcheevos)
   - talks to the RetroAchievements API
-  - keeps your Web API key: in the macOS Keychain, or on Linux and Windows in a file only your user account can read. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
+  - keeps your Web API key: in the macOS Keychain, on Linux in a file only your user account can read, or on Windows encrypted with your Windows account (DPAPI), so other users and other PCs can't read it. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
 - The app opens no network ports and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
 
 ## Setup
