@@ -415,7 +415,7 @@
           el(doc, "img", { src: set.game.iconURL, alt: "" }), el(doc, "span", {}, name));
       })));
     }
-    if (shown.game) kids.push(el(doc, "div", { class: "sra-game" }, el(doc, "img", { src: shown.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, shown.game.title)));
+    if (shown.game) kids.push(el(doc, "div", { class: "sra-game" }, sets.length < 2 && el(doc, "img", { src: shown.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, shown.game.title)));  // the icon row already shows it
     if (p.message) kids.push(el(doc, "div", { class: "sra-muted" }, p.state === "notMatched" ? `${p.message} Choose the game on the desktop library page.` : p.message));
     if (p.notice) kids.push(el(doc, "div", { class: "sra-notice" }, p.notice));
     kids.push(...bpmSummary(doc, shown.summary));
