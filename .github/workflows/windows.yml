@@ -24,8 +24,9 @@ jobs:
 
       - uses: compnerd/gha-setup-swift@v0.5.1
         with:
-          swift-version: swift-6.3-release
-          swift-build: 6.3-RELEASE
+          # 6.3's Foundation fails to read Steam's DevTools reply on Windows ("Failure writing output to destination").
+          swift-version: swift-6.4.2-release
+          swift-build: 6.4.2-RELEASE
 
       # rc.exe (for the icon) comes with the Windows SDK; this puts it on PATH.
       - uses: ilammy/msvc-dev-cmd@v1
