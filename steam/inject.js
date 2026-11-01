@@ -167,6 +167,7 @@
   .sra-info .sra-actions { margin: 0; }
   .sra-message { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
   .sra-close svg { width: 100%; height: 100%; }
+  .sra-stat { cursor: pointer; }
   .sra-btn.sra-addgames { margin-left: 8px; background: none; color: #8b929b; font-size: 12px; padding: 4px 6px; }
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
   `;
@@ -301,6 +302,27 @@
       p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)));
   };
 
+  // The "Achievements 3/35" stat in the play bar, next to Last Played / Play Time (the in-page bar only, like Steam).
+  const ACHIEVEMENT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"><g fill="currentColor"><path d="M9.64304 9.49988L6.39294 12.8055L9.64304 16.1112V20.8333H14.2858L18.0001 24.6111L21.7143 20.8333H26.3573V16.111L29.6072 12.8055L26.3573 9.50012V4.77777H21.7143L18.0001 1L14.2858 4.77777H9.64304V9.49988ZM22.6432 12.8056C22.6432 15.4136 20.5645 17.5278 18.0004 17.5278C15.4362 17.5278 13.3575 15.4136 13.3575 12.8056C13.3575 10.1976 15.4362 8.08334 18.0004 8.08334C20.5645 8.08334 22.6432 10.1976 22.6432 12.8056Z"></path><path d="M5 30.2778L8.25 24.6111H12.4286L15.6786 27.9167L11.5 35L9.17857 30.2778H5Z"></path><path d="M30.9999 30.2778L27.7499 24.6111H23.5713L20.3213 27.9167L24.4999 35L26.8213 30.2778H30.9999Z"></path></g></svg>';
+  const sel = (cls) => "." + CSS.escape((cls ?? "").split(" ")[0]);
+  const playBarStat = (doc, p) => {
+    const B = steamUI.classes("GameStatsSection", "MiniAchievements", "AchievementProgressRow");
+    const bar = B.InPage && [...doc.querySelectorAll(sel(B.Container))].find((n) => n.matches(sel(B.InPage)));
+    const stats = bar?.querySelector(sel(B.GameStatsSection));
+    if (!stats) return null;
+    const earned = p.achievements.filter((r) => r.unlocked).length, total = p.achievements.length;
+    const icon = el(doc, "div", { class: c(B, "GameStatIcon", "AchievementSVG") });
+    icon.innerHTML = ACHIEVEMENT_SVG;
+    const fill = el(doc, "div", { class: c(B, "DetailsProgressBar") });
+    fill.style.width = `${total ? earned * 100 / total : 0}%`;
+    const node = el(doc, "div", { class: c(B, "GameStat", "MiniAchievements") + " sra-stat", "data-sra-panel": "", onclick: () => openAll(p) }, icon,
+      el(doc, "div", { class: c(B, "GameStatRight") }, el(doc, "div", { class: c(B, "PlayBarLabel") }, "Achievements"),
+        el(doc, "div", { class: c(B, "AchievementProgressRow") }, el(doc, "div", { class: c(B, "PlayBarDetailLabel", "AchievementCountLabel") }, `${earned}/${total}`),
+          el(doc, "div", { class: c(B, "DetailsProgressContainer") }, fill))));
+    stats.append(node);
+    return node;
+  };
+
   const messageSection = (doc, p) => section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"],
     el(doc, "div", { class: c(K.details(), "Body") + " sra-message" }, el(doc, "div", {}, p.message),
       p.state === "signedOut" && el(doc, "button", { class: steamButton, onclick: () => openSettings() }, "Sign In"),
@@ -322,6 +344,8 @@
     host.prepend(main);
     current.nodes.push(main);
     main.querySelectorAll(".sra-iconrow").forEach((w) => w.parentElement.parentElement.sraFit());
+    const stat = p.summary && playBarStat(doc, p);
+    if (stat) current.nodes.push(stat);
     const left = p.game && steamUI.findClass(doc, "LeftColumn");
     if (left) {
       const notice = K.notice().Body && left.querySelector("." + CSS.escape(K.notice().Body.split(" ")[0]));
