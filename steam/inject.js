@@ -251,10 +251,11 @@
     el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
 
   // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
+  const subsetName = (sp) => /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
   const subsetRow = (doc, p, divider) => {
     const A = K.ach(), I = K.icon();
     const items = p.subsets.map((sp) => {
-      const name = /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
+      const name = subsetName(sp);
       const earned = sp.achievements.filter((r) => r.unlocked).length;
       return el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", "Achieved") + " Panel sra-subset", title: `${name}: ${earned} of ${sp.achievements.length}`, onclick: () => openAll(sp) },
         el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: sp.game.iconURL, alt: "" }))));
@@ -373,24 +374,41 @@
     }
   };
 
+  const bpmSummary = (doc, summary) => {
+    if (!summary) return [];
+    const fill = el(doc, "div");
+    fill.style.width = `${summary.percent}%`;
+    return [el(doc, "div", { class: "sra-summary" }, summary.text), el(doc, "div", { class: "sra-bar" }, fill),
+      el(doc, "div", { class: "sra-muted" }, [summary.pointsText, summary.hardcoreText].filter(Boolean).join(" · "))];
+  };
+  const bpmRow = (doc, row) =>
+    el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : "") },
+      el(doc, "img", { src: row.badgeURL, alt: "" }),
+      el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description)),
+      el(doc, "div", { class: "sra-row-side" }, `${row.points} points`, row.unlockedText && el(doc, "div", {}, row.unlockedText)));
+
+  // Big Picture's game page shares one content area between its tabs (ACTIVITY, YOUR STUFF, COMMUNITY, GAME INFO); ours belongs on the first.
+  const bpmOnActivity = (doc) => {
+    const T = steamUI.classes("GamepadTabbedPage", "TabRow", "TabTitle");
+    if (!T.Tab || !T.Selected) return true;
+    const tabs = [...doc.querySelectorAll("." + CSS.escape(T.Tab.split(" ")[0]))].filter((t) => t.querySelector("." + CSS.escape(T.TabTitle.split(" ")[0])));
+    const selected = tabs.findIndex((t) => t.classList.contains(T.Selected.split(" ")[0]));
+    return selected <= 0;
+  };
+
   // Big Picture: one scrollable block, no buttons or overlays (controller focus can't reach them reliably).
   const bpmBlock = (doc, p) => {
     const kids = [el(doc, "div", { class: "sra-head" }, "RetroAchievements")];
     if (p.game) kids.push(el(doc, "div", { class: "sra-game" }, el(doc, "img", { src: p.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, p.game.title)));
     if (p.message) kids.push(el(doc, "div", { class: "sra-muted" }, p.state === "notMatched" ? `${p.message} Choose the game on the desktop library page.` : p.message));
     if (p.notice) kids.push(el(doc, "div", { class: "sra-notice" }, p.notice));
-    if (p.summary) {
-      const fill = el(doc, "div");
-      fill.style.width = `${p.summary.percent}%`;
-      kids.push(el(doc, "div", { class: "sra-summary" }, p.summary.text), el(doc, "div", { class: "sra-bar" }, fill),
-        el(doc, "div", { class: "sra-muted" }, [p.summary.pointsText, p.summary.hardcoreText].filter(Boolean).join(" · ")));
-    }
+    kids.push(...bpmSummary(doc, p.summary));
     if (p.game?.details.length) kids.push(el(doc, "dl", { class: "sra-details" }, p.game.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)])));
-    kids.push(...p.achievements.map((row) =>
-      el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : "") },
-        el(doc, "img", { src: row.badgeURL, alt: "" }),
-        el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description)),
-        el(doc, "div", { class: "sra-row-side" }, `${row.points} points`, row.unlockedText && el(doc, "div", {}, row.unlockedText)))));
+    kids.push(...p.achievements.map((row) => bpmRow(doc, row)));
+    // Subsets are listed in full: nothing here can be clicked.
+    for (const sp of p.subsets ?? []) {
+      kids.push(el(doc, "div", { class: "sra-head" }, `Subset: ${subsetName(sp)}`), ...bpmSummary(doc, sp.summary), ...sp.achievements.map((row) => bpmRow(doc, row)));
+    }
     if (p.updatedText) kids.push(el(doc, "div", { class: "sra-muted" }, p.updatedText));
     return el(doc, "div", { class: "sra-panel sra-bpm", "data-sra-panel": "" }, kids);
   };
@@ -677,6 +695,7 @@
     } else if (current?.payload && current.payload.state !== "hidden" && current.nodes?.some((n) => !n.isConnected)) {
       render(current.payload);   // Steam re-rendered the page and dropped our node
     }
+    if (surface.bpm && current?.nodes) { const show = bpmOnActivity(doc); for (const n of current.nodes) n.style.display = show ? "" : "none"; }
     if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }
   });
 
