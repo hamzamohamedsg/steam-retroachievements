@@ -240,26 +240,33 @@
   // Big Picture's controller navigation only reaches elements registered in Steam's focus tree (what its own Focusable component does):
   // a node under the nearest registered ancestor, then the element. A failure just leaves the buttons mouse/touch-only.
   let navCleanups = [];
-  const registerNav = (doc, root, buttons) => {
+  const FLOW_ROW = 2;  // Steam's layout enum: NONE, COLUMN, ROW, ...
+  const registerNav = (doc, root) => {
     try {
       const context = FocusNavController.m_rgAllContexts.find((x) => x.m_rootWindow === doc.defaultView);
       const deepest = (node) => node.m_rgChildren.reduce((best, ch) => deepest(ch) ?? best, node.m_element?.contains(root) ? node : null);
       let parent = null;
       for (const tree of context?.m_rgGamepadNavigationTrees ?? []) parent = deepest(tree.m_Root) ?? parent;
       if (!parent) return [];
-      return buttons.map((button) => {
-        const node = parent.Tree.CreateNode(parent, undefined);
-        node.SetProperties({ focusable: "self", onOKActionDescription: button.title });
-        // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
-        button.addEventListener("vgp_onok", () => button.click());
-        navCleanups.push(parent.Tree.RegisterNavigationItem(node, button));
+      const add = (under, element, props) => {
+        const node = under.Tree.CreateNode(under, undefined);
+        node.SetProperties(props);
+        navCleanups.push(under.Tree.RegisterNavigationItem(node, element));
         return node;
+      };
+      // The subset icons form a row (left/right between them); the achievements below stay a column (up/down).
+      const row = root.querySelector(".sra-sets");
+      const rowNode = row && add(parent, row, { focusable: false, layout: FLOW_ROW })  // a group: focus goes to its icons, not to it;
+      return [...root.querySelectorAll(".sra-set, .sra-row")].map((el) => {
+        // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
+        el.addEventListener("vgp_onok", () => el.click());
+        return add(el.classList.contains("sra-set") ? rowNode : parent, el, { focusable: "self", onOKActionDescription: el.title });
       });
     } catch (e) { log("error", `controller focus unavailable: ${e?.message ?? e}`); return []; }
   };
 
   const removePanel = () => {
-    navCleanups.forEach((fn) => { try { fn(); } catch (_) {} });
+    navCleanups.reverse().forEach((fn) => { try { fn(); } catch (_) {} });  // children before their group
     navCleanups = [];
     hideCard();
     const doc = steamUI.doc();
@@ -387,7 +394,7 @@
     if (current.bpm) {
       const block = host.insertBefore(bpmBlock(doc, payload), host.firstChild);
       current.nodes.push(block);
-      const focusNodes = registerNav(doc, block, [...block.querySelectorAll(".sra-set, .sra-row")]);
+      const focusNodes = registerNav(doc, block);
       if (current.refocus != null) { focusNodes[current.refocus]?.BTakeFocus?.(); current.refocus = null; }  // the click rebuilt the buttons
       return;
     }
