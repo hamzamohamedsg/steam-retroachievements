@@ -128,6 +128,11 @@
   .sra-btn { background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; border-radius: 2px; padding: 6px 12px; font: inherit; cursor: pointer; }
   .sra-btn:hover { background: #1a9fff; }
   .sra-subset { cursor: pointer; }
+  .sra-sets { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 12px; }
+  .sra-set { display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.06); color: #fff; border: 2px solid transparent; border-radius: 4px; padding: 6px 12px 6px 6px; font: inherit; cursor: pointer; }
+  .sra-set img { width: 48px; height: 48px; border-radius: 3px; }
+  .sra-set.sra-active { border-color: #1a9fff; background: rgba(26, 159, 255, 0.2); }
+  .sra-set:focus-visible, .sra-set:hover { border-color: #67c1f5; outline: none; }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
@@ -398,17 +403,24 @@
 
   // Big Picture: one scrollable block, no buttons or overlays (controller focus can't reach them reliably).
   const bpmBlock = (doc, p) => {
+    // The game and its subsets are picked from an icon row; only the picked one's achievements are listed.
+    const sets = [p, ...(p.subsets ?? [])];
+    const at = Math.min(current.bpmSet ?? 0, sets.length - 1), shown = sets[at];
     const kids = [el(doc, "div", { class: "sra-head" }, "RetroAchievements")];
-    if (p.game) kids.push(el(doc, "div", { class: "sra-game" }, el(doc, "img", { src: p.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, p.game.title)));
+    if (sets.length > 1) {
+      kids.push(el(doc, "div", { class: "sra-sets" }, sets.map((set, i) => {
+        const name = i ? subsetName(set) : "Base game";
+        return el(doc, "button", { class: "sra-set Focusable" + (i === at ? " sra-active" : ""), type: "button", tabindex: "0", title: name,
+          onclick: () => { current.bpmSet = i; render(current.payload); } },
+          el(doc, "img", { src: set.game.iconURL, alt: "" }), el(doc, "span", {}, name));
+      })));
+    }
+    if (shown.game) kids.push(el(doc, "div", { class: "sra-game" }, el(doc, "img", { src: shown.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, shown.game.title)));
     if (p.message) kids.push(el(doc, "div", { class: "sra-muted" }, p.state === "notMatched" ? `${p.message} Choose the game on the desktop library page.` : p.message));
     if (p.notice) kids.push(el(doc, "div", { class: "sra-notice" }, p.notice));
-    kids.push(...bpmSummary(doc, p.summary));
-    if (p.game?.details.length) kids.push(el(doc, "dl", { class: "sra-details" }, p.game.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)])));
-    kids.push(...p.achievements.map((row) => bpmRow(doc, row)));
-    // Subsets are listed in full: nothing here can be clicked.
-    for (const sp of p.subsets ?? []) {
-      kids.push(el(doc, "div", { class: "sra-head" }, `Subset: ${subsetName(sp)}`), ...bpmSummary(doc, sp.summary), ...sp.achievements.map((row) => bpmRow(doc, row)));
-    }
+    kids.push(...bpmSummary(doc, shown.summary));
+    if (at === 0 && p.game?.details.length) kids.push(el(doc, "dl", { class: "sra-details" }, p.game.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)])));
+    kids.push(...shown.achievements.map((row) => bpmRow(doc, row)));
     if (p.updatedText) kids.push(el(doc, "div", { class: "sra-muted" }, p.updatedText));
     return el(doc, "div", { class: "sra-panel sra-bpm", "data-sra-panel": "" }, kids);
   };
