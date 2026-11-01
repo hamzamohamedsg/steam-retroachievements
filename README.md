@@ -29,6 +29,8 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 
 You can open the dialog again from the **RetroAchievements** button at the bottom of Steam's library, next to **Add a Game**.
 
+**Why the downloads differ in size:** the macOS download is under 1 MB because macOS already includes Swift and the libraries the app uses. Linux and Windows don't, so their downloads (about 25 MB each) carry them along: the Swift runtime, Foundation, networking, and Unicode data (ICU), which is the largest part. The Linux program has them built in; on Windows they're the DLL files next to the `.exe`, which is why every file in that folder has to stay together.
+
 Keep your ROMs in the `ROMs` folder in your home folder (`~/ROMs`), or EmuDeck's `~/Emulation/roms`. On macOS, background apps can't read the Desktop, Documents, Downloads, iCloud Drive, or external drives without extra permission.
 
 ## Adding games to Steam
