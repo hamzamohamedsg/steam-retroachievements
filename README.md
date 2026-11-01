@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Windows-11-0078d4.svg" alt="Windows 11">
     <img src="https://img.shields.io/badge/Linux-Steam%20Deck-1793d1.svg?logo=linux&logoColor=white" alt="Linux and Steam Deck">
     <img src="https://img.shields.io/badge/Swift-6-orange.svg?logo=swift" alt="Swift 6">
-    <img src="https://img.shields.io/badge/Price-Free-green.svg" alt="Free">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"></a>
   </p>
 </p>
 
@@ -158,6 +158,12 @@ swift build -c release --product SteamRetroAchievements -Xlinker /SUBSYSTEM:WIND
 The icons come from `scripts/make-icon.swift` (`swift scripts/make-icon.swift`), which writes the macOS `.icns`, the Windows `.ico` and `docs/icon.png`.
 
 `docs/steam-internals.md` records what was verified about Steam's interface on macOS. Read it first when a Steam update breaks something.
+
+---
+
+## 📄 License
+
+Steam RetroAchievements is free and open source under the [MIT License](LICENSE). It includes [rcheevos](https://github.com/RetroAchievements/rcheevos), also MIT licensed; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
