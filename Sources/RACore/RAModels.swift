@@ -111,6 +111,26 @@ public struct RAGameProgress: Codable, Equatable, Sendable {
     }
 }
 
+extension RAGameProgress {
+    /// This game with its subsets' achievements added after its own, each description starting with the subset's name.
+    /// Rarity is awarded / distinct players, so a subset's award counts are rescaled to this game's player count.
+    public func merging(subsets: [(name: String, progress: RAGameProgress)]) -> RAGameProgress {
+        var out = self
+        for (i, sub) in subsets.enumerated() {
+            let scale = sub.progress.numDistinctPlayers > 0 ? Double(numDistinctPlayers) / Double(sub.progress.numDistinctPlayers) : 0
+            out.achievements += sub.progress.achievements.map { a in
+                var a = a
+                a.description = "[\(sub.name)] " + a.description
+                a.displayOrder += 100_000 * (i + 1)  // after the base game's, subsets in order
+                a.numAwarded = Int((Double(a.numAwarded) * scale).rounded())
+                a.numAwardedHardcore = Int((Double(a.numAwardedHardcore) * scale).rounded())
+                return a
+            }
+        }
+        return out
+    }
+}
+
 enum RADate {
     static let formatter: DateFormatter = {
         let f = DateFormatter()

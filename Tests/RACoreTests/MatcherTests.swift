@@ -106,8 +106,7 @@ let bonusEntry = RAGameListEntry(id: 900, title: "Super Mario Bros. [Subset - Bo
 @Test func listsSubsetsOfTheGame() async throws {
     let other = RAGameListEntry(id: 901, title: "Other Game [Subset - Bonus]", consoleId: 7, consoleName: "", imageIcon: "", numAchievements: 3, hashes: [])
     let m = matcher(.hash("abc"), lists: [7: [smbEntry, bonusEntry, other]])
-    #expect(try await m.sets(gameId: 1446, consoleId: 7).map(\.name) == ["Base Set", "Bonus"])
-    #expect(try await m.sets(gameId: 1446, consoleId: 7).map(\.id) == [1446, 900])
-    #expect(try await m.sets(gameId: 900, consoleId: 7).isEmpty)  // asking about a subset itself
-    #expect(try await matcher(.hash("abc")).sets(gameId: 1446, consoleId: 7).isEmpty)  // no subsets
+    #expect(try await m.subsets(gameId: 1446, consoleId: 7).map(\.id) == [900])
+    #expect(try await m.subsets(gameId: 900, consoleId: 7).isEmpty)  // asking about a subset itself
+    #expect(try await matcher(.hash("abc")).subsets(gameId: 1446, consoleId: 7).isEmpty)  // no subsets
 }

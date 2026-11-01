@@ -82,15 +82,12 @@ public actor Matcher {
             .prefix(50))
     }
 
-    /// The game and its subsets (same title with a `[Subset - Name]` tag), base first. Empty when there are no subsets.
-    public func sets(gameId: Int, consoleId: Int) async throws -> [PanelPayload.SetRef] {
+    /// The subsets of a game: same title plus a `[Subset - Name]` tag. Empty for a subset itself.
+    public func subsets(gameId: Int, consoleId: Int) async throws -> [RAGameListEntry] {
         let list = try await ra.gameList(consoleId: consoleId)
         guard let base = list.first(where: { $0.id == gameId }), Titles.subsetName(base.title) == nil else { return [] }
         let key = Titles.key(base.title)
-        let subsets = list.compactMap { e in
-            Titles.subsetName(e.title).flatMap { Titles.key(e.title) == key ? PanelPayload.SetRef(id: e.id, name: $0) : nil }
-        }.sorted { ($0.name, $0.id) < ($1.name, $1.id) }
-        return subsets.isEmpty ? [] : [.init(id: gameId, name: "Base Set")] + subsets
+        return list.filter { Titles.subsetName($0.title) != nil && Titles.key($0.title) == key }.sorted { $0.id < $1.id }
     }
 
     /// Hash, base verification and candidate consoles; the stored hash is reused while the file is unchanged.

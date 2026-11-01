@@ -10,14 +10,6 @@ public struct PanelPayload: Codable, Equatable, Sendable {
     public var summary: Summary?
     public var achievements: [Row] = []
     public var updatedText: String?
-    /// The base game and its subsets, for the switcher; empty when the game has no subsets.
-    public var sets: [SetRef] = []
-
-    public struct SetRef: Codable, Equatable, Sendable {
-        public var id: Int
-        public var name: String
-    }
-
     public struct Game: Codable, Equatable, Sendable { public var id: Int; public var title, consoleName, iconURL, raURL: String; public var details: [Detail] }
     public struct Detail: Codable, Equatable, Sendable {
         public var label, value: String

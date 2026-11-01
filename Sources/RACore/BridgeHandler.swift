@@ -51,7 +51,6 @@ public final class BridgeHandler: BridgeHandling {
 
     struct ShortcutParams: Decodable { var shortcut: ShortcutInfo }
     struct SearchParams: Decodable { var consoleId: Int; var query: String }
-    struct SetParams: Decodable { var shortcut: ShortcutInfo; var gameId: Int }
     struct ChooseParams: Decodable { var shortcut: ShortcutInfo; var gameId: Int; var consoleId: Int }
     struct LogParams: Decodable { var level: String; var message: String }
     struct URLParams: Decodable { var url: String }
@@ -85,9 +84,6 @@ public final class BridgeHandler: BridgeHandling {
             return try encode(await panel(try d.decode(ShortcutParams.self, from: params).shortcut, fresh: false))
         case "refreshPanel":
             return try encode(await panel(try d.decode(ShortcutParams.self, from: params).shortcut, fresh: true))
-        case "getSet":
-            let p = try d.decode(SetParams.self, from: params)
-            return try encode(await panel(p.shortcut, fresh: true, showing: p.gameId))
         case "chooseGame":
             let p = try d.decode(ChooseParams.self, from: params)
             guard let s = await services() else { return try encode(PanelBuilder.signedOut()) }
@@ -155,10 +151,10 @@ public final class BridgeHandler: BridgeHandling {
         })
     }
 
-    private func panel(_ shortcut: ShortcutInfo, fresh: Bool, showing set: Int? = nil) async -> PanelPayload {
+    private func panel(_ shortcut: ShortcutInfo, fresh: Bool) async -> PanelPayload {
         guard let s = await services() else { return PanelBuilder.signedOut() }
         do {
-            return await payload(for: try await s.matcher.resolve(shortcut), shortcut, s, fresh: fresh, showing: set)
+            return await payload(for: try await s.matcher.resolve(shortcut), shortcut, s, fresh: fresh)
         } catch {
             actions.log("error", "resolve: \(error)")
             return PanelBuilder.failed(cached: nil, savedAt: nil)
@@ -166,28 +162,35 @@ public final class BridgeHandler: BridgeHandling {
     }
 
     /// Cached progress answers at once and a fresh copy is pushed later, unless `fresh` asks to wait for the network.
-    /// `set` shows one of the matched game's subsets instead of the game itself.
-    private func payload(for r: Resolution, _ shortcut: ShortcutInfo, _ s: Services, fresh: Bool, showing set: Int? = nil) async -> PanelPayload {
-        guard case let .matched(baseId, consoleId, verification) = r else {
+    /// The game's subsets are folded into its achievements; a subset that can't be fetched falls back to its cached copy, or is left out.
+    private func payload(for r: Resolution, _ shortcut: ShortcutInfo, _ s: Services, fresh: Bool) async -> PanelPayload {
+        guard case let .matched(gameId, consoleId, verification) = r else {
             if case let .notMatched(consoleId, verification) = r { return PanelBuilder.notMatched(consoleId: consoleId, verification: verification) }
             return PanelBuilder.hidden()
         }
-        let sets = (try? await s.matcher.sets(gameId: baseId, consoleId: consoleId)) ?? []
-        let gameId = set.flatMap { id in sets.contains { $0.id == id } ? id : nil } ?? baseId
-        let build = { (p: RAGameProgress, stale: Bool, savedAt: Date?, emulator: String) -> PanelPayload in
-            var out = PanelBuilder.matched(p, verification: verification, emulatorName: emulator, stale: stale, savedAt: savedAt)
-            out.sets = sets
-            return out
-        }
         let emulator = EmulatorLaunch.parse(exe: shortcut.exe, launchOptions: shortcut.launchOptions)?.emulator.displayName ?? "the emulator"
-        let cached = s.ra.cachedProgress(gameId: gameId)
-        let cachedPayload = cached.map { build($0.value, true, $0.savedAt, emulator) }
+        let subsets = ((try? await s.matcher.subsets(gameId: gameId, consoleId: consoleId)) ?? [])
+            .compactMap { e in Titles.subsetName(e.title).map { (id: e.id, name: $0) } }
+        func cached() -> (value: RAGameProgress, savedAt: Date)? {
+            guard let base = s.ra.cachedProgress(gameId: gameId) else { return nil }
+            return (base.value.merging(subsets: subsets.compactMap { sub in s.ra.cachedProgress(gameId: sub.id).map { (sub.name, $0.value) } }), base.savedAt)
+        }
+        @Sendable func fetch() async throws -> RAGameProgress {
+            let base = try await s.ra.gameProgress(gameId: gameId)
+            var found: [(name: String, progress: RAGameProgress)] = []
+            for sub in subsets {
+                if let p = (try? await s.ra.gameProgress(gameId: sub.id)) ?? s.ra.cachedProgress(gameId: sub.id)?.value { found.append((sub.name, p)) }
+            }
+            return base.merging(subsets: found)
+        }
+        let cachedHit = cached()
+        let cachedPayload = cachedHit.map { PanelBuilder.matched($0.value, verification: verification, emulatorName: emulator, stale: true, savedAt: $0.savedAt) }
 
         if let cachedPayload, !fresh {
             let push = push, actions = actions, appid = shortcut.appid
             Task {
-                guard let p = try? await s.ra.gameProgress(gameId: gameId) else { return }
-                let payload = build(p, false, nil, emulator)
+                guard let p = try? await fetch() else { return }
+                let payload = PanelBuilder.matched(p, verification: verification, emulatorName: emulator, stale: false, savedAt: nil)
                 guard let json = try? Self.encoder.encode(payload) else { return }
                 actions.log("info", "pushing fresh progress for \(gameId)")
                 await push("window.__sra.update({\"appid\":\(appid),\"payload\":\(String(decoding: json, as: UTF8.self))})")
@@ -195,11 +198,10 @@ public final class BridgeHandler: BridgeHandling {
             return cachedPayload
         }
         do {
-            let p = try await s.ra.gameProgress(gameId: gameId)
-            return build(p, false, nil, emulator)
+            return PanelBuilder.matched(try await fetch(), verification: verification, emulatorName: emulator, stale: false, savedAt: nil)
         } catch {
             actions.log("error", "progress \(gameId): \(error)")
-            return PanelBuilder.failed(cached: cachedPayload, savedAt: cached?.savedAt)
+            return PanelBuilder.failed(cached: cachedPayload, savedAt: cachedHit?.savedAt)
         }
     }
 

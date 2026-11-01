@@ -72,25 +72,19 @@ struct EchoHandler: BridgeHandling {
     #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }
 
-@Test func getSetShowsTheSubset() async throws {
+@Test func subsetAchievementsJoinTheGame() async throws {
     let data = tempDir()
     let services = Services(credentials: creds, dataDirectory: data, transport: FakeTransport { _ in (Data(), 500) })
     let cache = DiskCache(directory: data.appendingPathComponent("cache"))
     cache.put("gamelist-7", [smbEntry, bonusEntry])
-    cache.put("progress-1446", progress([ach(1, order: 1)]))
-    var bonus = progress([ach(2, order: 1), ach(3, order: 2)]); bonus.id = 900; bonus.title = bonusEntry.title
-    cache.put("progress-900", bonus)
+    cache.put("progress-1446", progress([ach(1, order: 1, awarded: 5)], players: 10))
+    cache.put("progress-900", progress([ach(2, order: 1, earned: Date(timeIntervalSince1970: 1_457_804_849), awarded: 2), ach(3, order: 2)], players: 4))
     let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
-    func panel(_ method: String, _ params: [String: Any]) async throws -> PanelPayload {
-        let body = try JSONSerialization.data(withJSONObject: params.merging(["shortcut": try JSONSerialization.jsonObject(with: JSONEncoder().encode(smb()))]) { $1 })
-        return try JSONDecoder().decode(PanelPayload.self, from: try await handler.handle(method: method, params: body))
-    }
-    let base = try await panel("getPanel", [:])
-    #expect(base.game?.id == 1446)
-    #expect(base.sets.map(\.id) == [1446, 900])
-    let set = try await panel("getSet", ["gameId": 900])
-    #expect(set.game?.id == 900)
-    #expect(set.achievements.count == 2)
-    #expect(set.sets.map(\.id) == [1446, 900])
-    #expect(try await panel("getSet", ["gameId": 12345]).game?.id == 1446)  // not one of this game's sets: the base game
+    let params = try JSONEncoder().encode(["shortcut": smb()])
+    let payload = try JSONDecoder().decode(PanelPayload.self, from: try await handler.handle(method: "getPanel", params: params))
+    #expect(payload.game?.id == 1446)
+    #expect(payload.achievements.map(\.id) == [2, 1, 3])  // unlocked first, then locked in order: base before subset
+    #expect(payload.achievements.first { $0.id == 3 }?.description.hasPrefix("[Bonus] ") == true)
+    #expect(payload.summary?.text == "You've unlocked 1/3 (33%)")
+    #expect(payload.achievements.first { $0.id == 2 }?.rarity == 50)  // 2 of the subset's 4 players, not 2 of 10
 }
