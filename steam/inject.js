@@ -64,6 +64,21 @@
       const hashes = steamUI.classMap[key];
       return hashes ? doc.querySelector([...hashes].map((h) => "." + CSS.escape(h)).join(",")) : null;
     },
+    // A whole class-map module, picked by keys only it has, so shared names like "Name" or "Container" resolve to the right component.
+    modules: null,
+    classes: (...keys) => {
+      if (!steamUI.modules) {
+        let req;
+        webpackChunksteamui.push([[Math.random()], {}, (r) => { req = r; }]);
+        steamUI.modules = [];
+        for (const id of Object.keys(req.m)) {
+          let ex;
+          try { ex = req(id); } catch (_) { continue; }
+          if (ex && typeof ex === "object" && Object.values(ex).filter((v) => typeof v === "string").length > 2) steamUI.modules.push(ex);
+        }
+      }
+      return steamUI.modules.find((m) => keys.every((k) => typeof m[k] === "string")) ?? {};
+    },
     panelHost: (doc, bpm) => steamUI.findClass(doc, bpm ? "AppDetailsContent" : "RightColumn"),
     addGameButton: (doc) => steamUI.findClass(doc, "AddGameButton"),
   };
@@ -109,18 +124,11 @@
   .sra-summary { color: #fff; }
   .sra-bar { height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 6px 0; overflow: hidden; }
   .sra-bar > div { height: 100%; background: linear-gradient(90deg, #1a9fff, #67c1f5); }
-  .sra-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
-  .sra-badge { width: 40px; height: 40px; border-radius: 2px; cursor: default; }
-  .sra-badge.sra-hc { box-shadow: 0 0 0 2px #e5b50d; }
-  .sra-more { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.07); color: #8b929b; border-radius: 2px; }
   .sra-actions { display: flex; gap: 14px; margin: 8px 0; align-items: center; }
   .sra-btn { background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; border-radius: 2px; padding: 6px 12px; font: inherit; cursor: pointer; }
   .sra-btn:hover { background: #1a9fff; }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
-  .sra-card { position: fixed; z-index: 10000; max-width: 280px; background: #22252b; border: 1px solid rgba(255, 255, 255, 0.14);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); padding: 10px; border-radius: 3px; font-family: "Motiva Sans", Arial, sans-serif; color: #c6d4df; font-size: 12px; pointer-events: none; }
-  .sra-card b { color: #fff; font-size: 13px; display: block; margin-bottom: 2px; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
   .sra-dialog { width: min(680px, 90vw); max-height: 80vh; display: flex; flex-direction: column; background: #1b2838; border-radius: 3px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); font-family: "Motiva Sans", Arial, sans-serif; color: #c6d4df; font-size: 13px; }
@@ -148,6 +156,17 @@
   .sra-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
   .sra-footer .sra-muted { white-space: pre-line; }
   .sra-row select { max-width: 170px; }
+  /* Steam-classed panel: only what Steam's classes leave to unlisted helpers (docs/steam-internals.md Q13). */
+  :where(.sra-h2) { margin: 0; font: unset; }
+  .sra-iconrow { width: 100%; height: 100%; display: flex; flex-direction: row; } .sra-iconrow > div { height: 100%; }
+  .sra-li { margin-bottom: 8px; }
+  .sra-info { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: #c6d4df; }
+  .sra-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 0; }
+  .sra-info dt { color: #8b929b; } .sra-info dd { margin: 0; color: #fff; }
+  .sra-info .sra-notice { margin: 0; }
+  .sra-info .sra-actions { margin: 0; }
+  .sra-message { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+  .sra-close svg { width: 100%; height: 100%; }
   .sra-btn.sra-addgames { margin-left: 8px; background: none; color: #8b929b; font-size: 12px; padding: 4px 6px; }
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
   `;
@@ -172,77 +191,146 @@
     doc.head.append(s);
   };
 
-  // ---------------------------------------------------------------- panel
-  let current = null;        // { appid, shortcut, payload }
+  // ---------------------------------------------------------------- panel (built from Steam's own classes: docs/steam-internals.md Q13)
+  let current = null;        // { appid, shortcut, payload, nodes }
   let hoverCard = null;
+  const c = (mod, ...keys) => keys.map((k) => mod[k] ?? "").join(" ");
+  const K = {
+    section: () => steamUI.classes("SectionHeader", "PadLeft", "LabelText"),
+    details: () => steamUI.classes("AppDetailsSectionContainer", "AppDetailsSectionHasLabel", "RightColumnSection"),
+    ach: () => steamUI.classes("RightAchievementSection", "UnachievedSection"),
+    icon: () => steamUI.classes("AchievementIconWrapper", "Icon"),
+    button: () => steamUI.classes("AppDetailsButton", "BottomRight"),
+    hover: () => steamUI.classes("HoverPositionOuter", "HoverPosition"),
+    hoverBg: () => steamUI.classes("AppDetailsHover", "BlurContainer"),
+    notice: () => steamUI.classes("OfflineButton", "InnerContainer", "Body"),
+  };
+  const steamButton = "DialogButton _DialogLayout Secondary Focusable";
 
   const showCard = (doc, target, row) => {
     hideCard();
-    const r = target.getBoundingClientRect();
-    hoverCard = el(doc, "div", { class: "sra-card" },
-      el(doc, "b", {}, row.title), row.description,
-      el(doc, "div", { class: "sra-muted" }, `${row.points} points`),
-      row.unlockedText && el(doc, "div", { class: "sra-muted" }, row.unlockedText),
-      row.rarityText && el(doc, "div", { class: "sra-muted" }, row.rarityText));
+    const A = K.ach(), I = K.icon(), H = K.hover(), B = K.hoverBg();
+    const points = `${row.points} points${row.hardcore ? " · hardcore" : ""}`;
+    const pos = el(doc, "div", { class: c(H, "HoverPosition", "Ready") },
+      el(doc, "div", {}, el(doc, "div", { class: c(B, "AppDetailsHover") + " " + c(A, "Hover") + (row.unlocked ? " " + c(A, "Achieved") : "") },
+        el(doc, "div", { class: c(B, "Background") }, el(doc, "div", { class: c(B, "BlurContainer") }, el(doc, "img", { src: row.badgeURL, alt: "" }))),
+        el(doc, "div", { class: c(A, "TopSection") },
+          el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "TopSectionAchievementIcon", "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: row.badgeURL, alt: "" })),
+          el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, row.title), el(doc, "div", { class: c(A, "Desc") }, row.description))),
+        el(doc, "div", { class: c(A, "Unlocked") }, row.unlockedText && el(doc, "div", {}, row.unlockedText), el(doc, "div", {}, points),
+          row.rarityText && el(doc, "div", {}, row.rarityText)))));
+    hoverCard = el(doc, "div", { class: c(H, "HoverPositionOuter"), popover: "manual" }, pos);
     doc.body.append(hoverCard);
-    hoverCard.style.left = `${Math.min(r.left, doc.defaultView.innerWidth - 300)}px`;
-    hoverCard.style.top = `${r.bottom + 6}px`;
+    try { hoverCard.showPopover(); } catch (_) {}   // top layer, above Steam's own stacking contexts
+    hoverCard.style.display = "block";
+    const r = target.getBoundingClientRect(), w = pos.getBoundingClientRect().width || 320;
+    pos.style.left = `${Math.max(8, Math.min(r.left, doc.defaultView.innerWidth - w - 8))}px`;
+    pos.style.top = `${r.bottom + 8}px`;
   };
   const hideCard = () => { hoverCard?.remove(); hoverCard = null; };
 
   const removePanel = () => {
     hideCard();
-    steamUI.doc()?.querySelectorAll("[data-sra-panel]").forEach((n) => n.remove());
+    const doc = steamUI.doc();
+    doc?.querySelectorAll("[data-sra-panel]").forEach((n) => n.remove());
+    doc?.querySelectorAll("[data-sra-hid]").forEach((n) => { n.style.display = ""; n.removeAttribute("data-sra-hid"); });
   };
+
+  // A Steam library section: uppercase heading over a panel.
+  const section = (doc, title, containerKeys, ...content) => {
+    const S = K.section(), D = K.details();
+    return el(doc, "div", { class: c(D, "AppDetailsSection") + " Panel", "data-sra-panel": "" },
+      el(doc, "h2", { class: c(S, "SectionHeader", "PadLeft") + " sra-h2" }, el(doc, "div", { class: c(S, "Label") }, el(doc, "div", { class: c(S, "LabelText") }, title))),
+      el(doc, "div", { class: c(D, "AppDetailsSectionContainer", ...containerKeys) + " Panel" }, ...content));
+  };
+
+  const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel",
+      onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard },
+    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
+
+  // "Locked Achievements"-style row: as many icons as fit, the rest as "+N" (filled in once it's on screen and has a width).
+  const iconRow = (doc, label, rows, achieved, divider, p) => {
+    const A = K.ach(), wrap = el(doc, "div", { class: "sra-iconrow" });
+    const item = (row) => el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", achieved ? "Achieved" : "NotAchieved") + " Panel" }, iconOf(doc, row)));
+    const remainder = (n) => el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", "RemainderContainer") + " Panel", onclick: () => openAll(p) },
+      el(doc, "div", { class: c(A, "Remainder") }, el(doc, "div", { class: c(A, "RemainderText") }, "+", String(n)))));
+    const node = el(doc, "div", { class: c(A, "UnachievedSection") + (divider ? " " + c(A, "ShowDivider") : "") },
+      el(doc, "div", { class: c(A, "Label") }, label), el(doc, "div", { class: c(A, "Additional") }, wrap));
+    node.sraFit = () => {
+      wrap.replaceChildren(...rows.map(item));
+      const kids = [...wrap.children], step = kids.length > 1 ? kids[1].offsetLeft - kids[0].offsetLeft : kids[0]?.offsetWidth;
+      const fit = step ? Math.max(1, Math.floor(wrap.clientWidth / step)) : rows.length;
+      if (rows.length > fit) wrap.replaceChildren(...rows.slice(0, fit - 1).map(item), remainder(rows.length - fit + 1));
+    };
+    return node;
+  };
+
+  const achievementsSection = (doc, p) => {
+    const A = K.ach(), D = K.details(), s = p.summary;
+    const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
+    const fill = el(doc, "div", { class: c(A, "AchievementProgress") });
+    fill.style.width = `${s?.percent ?? 0}%`;
+    const highlight = el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv") },
+      el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, s.text.replace(/\s*\(\d+%\)$/, "")), " ",
+        el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`)] : el(doc, "span", {}, p.message)),
+      s && el(doc, "div", { class: c(A, "AchievementProgressContainer") }, fill),
+      el(doc, "div", { class: c(A, "GlobalStatLabel") }));
+    const rows = [];
+    if (unlocked.length) {
+      const r = unlocked[0];  // most recent first (PanelBuilder sorts)
+      rows.push(el(doc, "div", { class: c(A, "RightAchievementSection", "Achieved", "Featured") + " Panel" }, iconOf(doc, r),
+        el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description))));
+    }
+    if (unlocked.length > 1) rows.push(iconRow(doc, "Unlocked Achievements", unlocked.slice(1), true, true, p));
+    if (locked.length) rows.push(iconRow(doc, "Locked Achievements", locked, false, unlocked.length > 0, p));
+    const body = s && el(doc, "div", { class: c(D, "Body") }, rows,
+      el(doc, "button", { class: c(K.button(), "AppDetailsButton", "BottomRight") + " " + steamButton, onclick: () => openAll(p) }, "View My Achievements"));
+    return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], highlight, body);
+  };
+
+  // Replaces Steam's "detailed information is unavailable" box on the left.
+  const detailsSection = (doc, p) => {
+    const g = p.game;
+    return section(doc, "Details", ["AppDetailsSectionHasLabel"], el(doc, "div", { class: c(K.details(), "Body") + " sra-info" },
+      p.notice && el(doc, "div", { class: "sra-notice" }, p.notice),
+      el(doc, "dl", {}, el(doc, "dt", {}, "Game"), el(doc, "dd", {}, g.title), g.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)]),
+        p.summary && [el(doc, "dt", {}, "Points"), el(doc, "dd", {}, [p.summary.pointsText, p.summary.hardcoreText].filter(Boolean).join(" · "))]),
+      el(doc, "div", { class: "sra-actions" },
+        el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"),
+        el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")),
+      p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)));
+  };
+
+  const messageSection = (doc, p) => section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"],
+    el(doc, "div", { class: c(K.details(), "Body") + " sra-message" }, el(doc, "div", {}, p.message),
+      p.state === "signedOut" && el(doc, "button", { class: steamButton, onclick: () => openSettings() }, "Sign In"),
+      p.state === "notMatched" && el(doc, "button", { class: steamButton, onclick: () => openChooser(p.consoleId) }, "Choose game")));
 
   const render = (payload) => {
     const doc = steamUI.doc();
     if (!doc || !current) return;
     current.payload = payload;
     removePanel();
+    current.nodes = [];
     if (payload.state === "hidden") return;
     const host = steamUI.panelHost(doc, current.bpm);
     if (!host) return;
     ensureStyle(doc);
-    if (current.bpm) return host.prepend(bpmBlock(doc, payload));
+    if (current.bpm) return current.nodes.push(host.insertBefore(bpmBlock(doc, payload), host.firstChild));
 
-    const p = payload, kids = [el(doc, "div", { class: "sra-head" }, "RetroAchievements")];
-    if (p.state === "signedOut") {
-      kids.push(el(doc, "div", {}, p.message), el(doc, "div", { class: "sra-actions" },
-        el(doc, "button", { class: "sra-btn", onclick: () => openSettings() }, "Sign In")));
-    } else if (p.state === "notMatched") {
-      kids.push(el(doc, "div", {}, p.message), el(doc, "div", { class: "sra-actions" },
-        el(doc, "button", { class: "sra-btn", onclick: () => openChooser(p.consoleId) }, "Choose game")));
-    } else if (p.state === "error") {
-      kids.push(el(doc, "div", { class: "sra-muted" }, p.message));
-    } else {
-      const g = p.game;
-      kids.push(el(doc, "div", { class: "sra-game" },
-        el(doc, "img", { src: g.iconURL, alt: "" }),
-        el(doc, "div", {}, el(doc, "div", { class: "sra-game-title" }, g.title),
-          el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"))));
-      if (p.notice) kids.push(el(doc, "div", { class: "sra-notice" }, p.notice));
-      if (p.state === "noSet") {
-        kids.push(el(doc, "div", { class: "sra-muted" }, p.message));
-      } else {
-        const s = p.summary, shown = p.achievements.slice(0, 10);
-        kids.push(
-          el(doc, "div", { class: "sra-summary" }, s.text),
-          el(doc, "div", { class: "sra-bar" }, (() => { const f = el(doc, "div"); f.style.width = `${s.percent}%`; return f; })()),
-          el(doc, "div", { class: "sra-muted" }, [s.pointsText, s.hardcoreText].filter(Boolean).join(" · ")),
-          el(doc, "div", { class: "sra-badges" },
-            shown.map((row) => el(doc, "img", { class: "sra-badge" + (row.hardcore ? " sra-hc" : ""), src: row.badgeURL, alt: row.title,
-              onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard })),
-            p.achievements.length > shown.length && el(doc, "div", { class: "sra-more" }, `+${p.achievements.length - shown.length}`)),
-          el(doc, "div", { class: "sra-actions" },
-            el(doc, "button", { class: "sra-btn", onclick: () => openAll(p) }, "View all achievements"),
-            el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")));
-      }
-      if (g.details.length) kids.push(el(doc, "dl", { class: "sra-details" }, g.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)])));
+    const p = payload, main = p.game ? achievementsSection(doc, p) : messageSection(doc, p);
+    host.prepend(main);
+    current.nodes.push(main);
+    main.querySelectorAll(".sra-iconrow").forEach((w) => w.parentElement.parentElement.sraFit());
+    const left = p.game && steamUI.findClass(doc, "LeftColumn");
+    if (left) {
+      const notice = K.notice().Body && left.querySelector("." + CSS.escape(K.notice().Body.split(" ")[0]));
+      const box = notice?.closest("." + CSS.escape(c(K.details(), "AppDetailsSection").split(" ")[0]));
+      if (box) { box.style.display = "none"; box.setAttribute("data-sra-hid", ""); }
+      const details = detailsSection(doc, p);
+      left.prepend(details);
+      current.nodes.push(details);
     }
-    if (p.updatedText) kids.push(el(doc, "div", { class: "sra-muted" }, p.updatedText));
-    const panel = el(doc, "div", { class: "sra-panel", "data-sra-panel": "" }, kids);
-    host.prepend(panel);
   };
 
   // Big Picture: one scrollable block, no buttons or overlays (controller focus can't reach them reliably).
@@ -283,15 +371,86 @@
     return node;
   };
 
+  // Steam's achievements page (View My Achievements), over the game page like Steam's own.
   const openAll = (p) => {
     const doc = steamUI.doc();
-    if (!doc) return;
-    overlay(doc, p.game.title, el(doc, "div", { class: "sra-dialog-body" }, p.achievements.map((row) =>
-      el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : "") },
-        el(doc, "img", { src: row.badgeURL, alt: "" }),
-        el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description)),
-        el(doc, "div", { class: "sra-row-side" }, `${row.points} points`, row.unlockedText && el(doc, "div", {}, row.unlockedText),
-          row.rarityText && el(doc, "div", {}, row.rarityText))))));
+    if (!doc || !p.game) return;
+    closeOverlay?.();
+    hideCard();
+    const O = steamUI.classes("AchievementsOverlayContainer", "AchievementsPageContainer", "CloseButton");
+    const G = steamUI.classes("GamepadPage", "Flexed", "OverflowHidden");
+    const P = steamUI.classes("HeaderContainer", "AchievementTabs", "MyAchievementsHeader");
+    const H = steamUI.classes("StatsBlock", "BigStat", "AchievementSearchHeader");
+    const T = steamUI.classes("GamepadTabbedPage", "TabRow", "TabTitle");
+    const S = steamUI.classes("ScrollPanel", "ScrollY", "ScrollX");
+    const L = steamUI.classes("AchievementListItemBase", "AchievementTitle", "UnlockDate");
+    const PB = steamUI.classes("ProgressBar", "Percent", "Indeterminate", "TimeRemaining");
+    const IM = steamUI.classes("GreyBackground", "Visibility", "Visible");
+    const I = K.icon();
+    const bar = (pct) => {
+      const f = el(doc, "div", { class: c(PB, "Percent") });
+      f.style.width = `${pct}%`;
+      f.style.background = "var(--gpColor-Blue, #1a9fff)";  // Steam sets the colour inline too
+      return el(doc, "div", { class: c(PB, "ProgressBar") }, f);
+    };
+    const total = p.achievements.length, earned = p.achievements.filter((r) => r.unlocked).length, pct = p.summary?.percent ?? 0;
+    const hero = doc.querySelector('img[src*="_hero"]')?.getAttribute("src");
+
+    let tab = "my", query = "";
+    const tabs = [["my", "My Achievements"], ["global", "Global Achievements"]].map(([id, title]) =>
+      el(doc, "div", { class: c(T, "Tab", "RightAddon") + " Panel", "data-tab": id, onclick: () => { tab = id; draw(); } }, el(doc, "span", { class: c(T, "TabTitle") }, title)));
+    const search = el(doc, "input", { class: "DialogInput DialogInputPlaceholder DialogTextInputBase Focusable", placeholder: "Search", type: "text",
+      oninput: () => { query = search.value.trim().toLowerCase(); draw(); } });
+    const list = el(doc, "div", {});
+    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel sra-li" }, el(doc, "div", { class: c(L, "Container") },
+      el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
+      el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
+        el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, r.description),
+        el(doc, "div", { class: c(L, "AchievementGlobalPercentage", "InBody") }, [`${r.points} points${r.hardcore ? " · hardcore" : ""}`, tab === "my" && r.rarityText].filter(Boolean).join(" · ")))),
+      el(doc, "div", { class: c(L, "Right") }, el(doc, "div", { class: c(L, "VerticalContent", "AlignEnd") },
+        tab === "global" ? [el(doc, "div", { class: c(L, "ProgressCount") }, r.rarity == null ? "" : `${r.rarity.toFixed(1)}%`), el(doc, "div", { class: c(L, "ProgressBar") }, bar(r.rarity ?? 0))]
+          : r.unlocked ? [el(doc, "div", { class: c(L, "UnlockDate") }, r.unlockedText), el(doc, "div", { class: c(L, "ProgressBar") }, bar(100))] : []))));
+    const draw = () => {
+      tabs.forEach((t) => { t.className = c(T, "Tab", "RightAddon", ...(t.dataset.tab === tab ? ["Selected"] : [])) + " Panel"; });
+      const rows = p.achievements.filter((r) => !query || `${r.title} ${r.description}`.toLowerCase().includes(query));
+      if (tab === "global") return list.replaceChildren(...[...rows].sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).map(row));
+      const locked = rows.filter((r) => !r.unlocked);
+      list.replaceChildren(...rows.filter((r) => r.unlocked).map(row), ...(locked.length ? [el(doc, "div", { class: c(L, "ListTitle") }, "Locked Achievements")] : []), ...locked.map(row));
+    };
+
+    const header = el(doc, "div", { class: c(P, "HeaderContainer") + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
+      el(doc, "div", { class: c(H, "Title") }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
+        el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: p.game.iconURL, alt: "" })), p.game.title),
+      el(doc, "div", { class: "Panel" }, el(doc, "div", { class: c(H, "StatsBlock") }, el(doc, "div", { class: c(H, "Stat", "BigStat") },
+        el(doc, "div", { class: c(H, "StatLabelAndValue") },
+          el(doc, "div", { class: c(H, "ProgressLabel") }, el(doc, "div", { class: c(H, "Label") }, `${earned} of ${total} achievements earned`), el(doc, "div", { class: c(H, "Label") }, `(${pct}%)`)),
+          el(doc, "div", { class: c(H, "Progress") }, bar(pct)))))))));
+    const tabbed = el(doc, "div", { class: c(T, "GamepadTabbedPage", "CanBeHeaderBackground") + " Panel" },
+      el(doc, "div", { class: c(T, "TabHeaderRowWrapper", "Pinned") }, el(doc, "div", { class: c(T, "TabRow") }, el(doc, "div", { class: c(T, "TabRowTabs") },
+        el(doc, "div", { class: c(T, "TabsRowScroll") }, el(doc, "div", { class: c(T, "FixCenterAlignScroll") + " Panel" },
+          el(doc, "div", { class: c(T, "TabRowSpacer") }), tabs, el(doc, "div", { class: c(T, "TabRowSpacer") })))))),
+      el(doc, "div", { class: c(T, "TabContents") + " Panel" }, el(doc, "div", { class: "_TabContentsScroll " + c(T, "TabContentsScroll") + " Panel" },
+        el(doc, "div", { class: c(L, "AchievementList") + " " + c(P, "List") + " Panel" },
+        el(doc, "div", { class: c(H, "AchievementSearchHeader") + " " + c(P, "MyAchievementsHeader") + " Panel" }, el(doc, "div", { class: c(H, "LeftContent") }),
+          el(doc, "div", { class: c(H, "SearchField") }, el(doc, "div", { class: "DialogInput_Wrapper _DialogLayout Panel" }, search))),
+        list))));
+    const closeButton = el(doc, "div", { class: c(O, "CloseButton") + " sra-close", onclick: () => close() });
+    closeButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="SVGIcon_Button SVGIcon_X_Line" viewBox="0 0 256 256"><line fill="none" stroke="#FFFFFF" stroke-width="45" x1="212" y1="212" x2="44" y2="44"></line><line fill="none" stroke="#FFFFFF" stroke-width="45" x1="44" y1="212" x2="212" y2="44"></line></svg>';
+    const node = el(doc, "div", { class: c(O, "AppDetailsOverlayTransitionGroup") },
+      el(doc, "div", { class: c(O, "AchievementsOverlayContainer", "OverlayAppDetailsTransitionEntered") },
+        el(doc, "div", { class: c(O, "AchievementsPageContainer") },
+          el(doc, "div", { class: c(G, "GamepadPage", "Flexed", "OverflowHidden") + " Panel" },
+            el(doc, "div", { class: c(P, "Page") + " " + c(S, "ScrollPanel", "ScrollY") + " Panel" },
+              el(doc, "div", { class: c(P, "Background") }, el(doc, "div", { class: c(P, "Blur") }),
+                hero && el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(P, "HeaderImage") }, el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: hero, alt: "" }))),
+              el(doc, "div", { class: c(P, "Container") + " Panel" }, header, el(doc, "div", { class: c(P, "AchievementTabs") + " Panel" }, tabbed)))),
+          closeButton)));
+    const onKey = safe((e) => { if (e.key === "Escape") close(); });
+    const close = () => { node.remove(); doc.removeEventListener("keydown", onKey, true); closeOverlay = null; };
+    doc.addEventListener("keydown", onKey, true);
+    (steamUI.findClass(doc, "AppDetailsMain") ?? doc.body).append(node);
+    closeOverlay = close;
+    draw();
   };
 
   const openChooser = async (consoleId) => {
@@ -475,7 +634,7 @@
       closeOverlay?.();
       current = appid && steamUI.isShortcut(appid) ? { appid, bpm: surface.bpm, shortcut: null, payload: null } : null;
       if (current) load(appid, "getPanel");
-    } else if (current?.payload && !doc.querySelector("[data-sra-panel]") && current.payload.state !== "hidden") {
+    } else if (current?.payload && current.payload.state !== "hidden" && current.nodes?.some((n) => !n.isConnected)) {
       render(current.payload);   // Steam re-rendered the page and dropped our node
     }
     if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }

@@ -24,6 +24,8 @@ public struct PanelPayload: Codable, Equatable, Sendable {
         public var badgeURL: String
         public var unlocked, hardcore: Bool
         public var unlockedText, rarityText: String?
+        /// Percent of players who have it, for sorting the Global Achievements tab.
+        public var rarity: Double?
     }
 
     init(state: String, message: String? = nil, notice: String? = nil, consoleId: Int? = nil) {
@@ -53,15 +55,14 @@ public enum PanelBuilder {
         let unlocked = p.achievements.filter { earned($0) != nil }.sorted { earned($0)! > earned($1)! }
         let locked = p.achievements.filter { earned($0) == nil }.sorted { $0.displayOrder < $1.displayOrder }
         let full = formatter(.medium, .short, timeZone, locale)
+        let rarity = { (a: RAAchievement) in p.numDistinctPlayers > 0 ? Double(a.numAwarded) * 100 / Double(p.numDistinctPlayers) : nil }
         out.achievements = (unlocked + locked).map { a in
             let isUnlocked = earned(a) != nil
             return .init(id: a.id, title: a.title, description: a.description, points: a.points,
                          badgeURL: "\(media)/Badge/\(a.badgeName)\(isUnlocked ? "" : "_lock").png",
                          unlocked: isUnlocked, hardcore: a.dateEarnedHardcore != nil,
                          unlockedText: earned(a).map { "Unlocked " + full.string(from: $0) },
-                         rarityText: p.numDistinctPlayers > 0
-                            ? String(format: "%.1f%% of players have this achievement", Double(a.numAwarded) * 100 / Double(p.numDistinctPlayers))
-                            : nil)
+                         rarityText: rarity(a).map { String(format: "%.1f%% of players have this achievement", $0) }, rarity: rarity(a))
         }
 
         if !p.achievements.isEmpty {

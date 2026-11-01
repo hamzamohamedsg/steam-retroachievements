@@ -42,6 +42,7 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     let p = build(progress([ach(1, order: 1, awarded: 5), ach(2, order: 2, earned: Date(timeIntervalSince1970: 0))]))
     let locked = p.achievements.first { !$0.unlocked }!, unlocked = p.achievements.first { $0.unlocked }!
     #expect(locked.rarityText == "50.0% of players have this achievement")
+    #expect(locked.rarity == 50)
     #expect(locked.badgeURL == "https://media.retroachievements.org/Badge/b1_lock.png")
     #expect(unlocked.badgeURL == "https://media.retroachievements.org/Badge/b2.png")
     #expect(unlocked.unlockedText == "Unlocked Jan 1, 1970 at 12:00\u{202F}AM")
