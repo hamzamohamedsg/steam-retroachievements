@@ -103,7 +103,12 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
             try? marker.ensure()
             let (running, launched) = Self.steamProcess()
             steamSeen = running ? steamSeen ?? Date() : nil
-            let targets = await Self.fetchTargets()
+            let fetched = await Self.fetchTargets()
+            let targets = try? fetched.get()
+            if running, case .failure(let error) = fetched, "\(error)" != lastPortError {
+                lastPortError = "\(error)"
+                onError?("Steam's port check failed: \(error)")
+            }
             let next = Self.decide(steamRunning: running, steamLaunched: launched ?? steamSeen, markerCreated: marker.createdAt,
                                    portAnswered: targets != nil, now: Date())
             state = next
@@ -141,12 +146,19 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         return URLSession(configuration: config)
     }()
 
-    private nonisolated static func fetchTargets() async -> [CDPTarget]? {
+    private nonisolated static func fetchTargets() async -> Result<[CDPTarget], Error> {
         var req = URLRequest(url: listURL, timeoutInterval: 2)
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        guard let (data, _) = try? await probeSession.data(for: req) else { return nil }
-        return try? JSONDecoder().decode([CDPTarget].self, from: data)
+        do {
+            let (data, _) = try await probeSession.data(for: req)
+            return .success(try JSONDecoder().decode([CDPTarget].self, from: data))
+        } catch {
+            return .failure(error)
+        }
     }
+
+    /// The last reason the port check failed, so a steady "connection refused" is reported once, not every few seconds.
+    private var lastPortError: String?
 
     private func connect(_ url: URL) async {
         let ws = URLSession.shared.webSocketTask(with: url)
