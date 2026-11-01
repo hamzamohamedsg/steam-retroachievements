@@ -32,8 +32,6 @@ You play your retro games through Steam, but their achievements live on a websit
 |---|---|
 | ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
 
-> Linux and Windows support is new. The Windows build has been run on Windows 11, where it connects to Steam and shows its buttons and sign-in dialog; signing in with a real account and the achievements panel on a game page haven't been checked there yet. The Linux build hasn't been run on a Linux machine yet.
-
 ---
 
 ## ⚡ Features
