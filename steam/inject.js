@@ -395,7 +395,7 @@
     if (current.bpm) {
       // Like a Steam game: unlocks in the ACTIVITY feed, the achievements section and details under YOUR STUFF.
       const tab = bpmTab(doc), p = payload, S = steamUI.classes("SeekTarget", "SpotlightLeftColumn").SeekTarget;
-      const nodes = (tab === 0 ? [p.game ? bpmActivity(doc, p) : messageSection(doc, p)]
+      const nodes = (tab === 0 ? [p.game ? activitySection(doc, p) : messageSection(doc, p)]
         : tab === 1 ? [p.summary ? bpmStuff(doc, p) : messageSection(doc, p), p.game && detailsSection(doc, p)] : []).filter(Boolean);
       ((S && host.querySelector(sel(S))) ?? host).prepend(...nodes);
       current.nodes.push(...nodes);
@@ -408,7 +408,7 @@
     const p = payload, main = p.game ? achievementsSection(doc, p) : messageSection(doc, p);
     host.prepend(main);
     current.nodes.push(main);
-    main.querySelectorAll(".sra-iconrow").forEach((w) => w.parentElement.parentElement.sraFit());
+    main.querySelectorAll(".sra-iconrow").forEach((w) => w.parentElement.parentElement.sraFit?.());  // the subset row shows every icon
     const stat = p.summary && playBarStat(doc, p);
     if (stat) current.nodes.push(stat);
     const left = p.game && steamUI.findClass(doc, "LeftColumn");
@@ -416,9 +416,9 @@
       const notice = K.notice().Body && left.querySelector("." + CSS.escape(K.notice().Body.split(" ")[0]));
       const box = notice?.closest("." + CSS.escape(c(K.details(), "AppDetailsSection").split(" ")[0]));
       if (box) { box.style.display = "none"; box.setAttribute("data-sra-hid", ""); }
-      const details = detailsSection(doc, p);
-      left.prepend(details);
-      current.nodes.push(details);
+      const details = detailsSection(doc, p), activity = activitySection(doc, p);
+      left.prepend(details, ...(activity ? [activity] : []));
+      current.nodes.push(details, ...(activity ? [activity] : []));
     }
   };
 
@@ -475,8 +475,9 @@
       el(doc, "div", { class: c(D, "Body") + " " + c(A, "BodyStopJiggle", "BasicAppDetailsAchievementsSectionBody") }, parts));
   };
 
-  // ACTIVITY: "<you> achieved" events, one per day with unlocks, newest first, in Steam's activity feed markup.
-  const bpmActivity = (doc, p) => {
+  // "<you> achieved" events, one per day with unlocks, newest first, in Steam's activity feed markup:
+  // Big Picture's ACTIVITY tab (each event a focusable carousel) or the desktop page's left column (a plain grid).
+  const activitySection = (doc, p) => {
     const unlocked = p.achievements.filter((r) => r.unlocked);
     if (!unlocked.length) return null;
     const ACT = steamUI.classes("AppActivityDay", "EventHeadline"), F = steamUI.classes("ActivityFeedContainer", "Rollup", "FetchMoreContainer");
@@ -484,16 +485,18 @@
     const A = K.ach(), I = K.icon(), me = window.friendStore?.m_FriendsUIFriendStore?.self?.persona, open = () => openAll(p);
     const days = [];
     for (const r of unlocked) { const last = days.at(-1); last && last.day === r.unlockedDay ? last.rows.push(r) : days.push({ day: r.unlockedDay, rows: [r] }); }
-    const item = (r) => el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + " Panel Focusable sra-item", tabindex: "0", onclick: open,
-        onfocus: () => item.scrollIntoView({ block: "nearest", inline: "nearest" }) },
+    const item = (r) => el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + (current.bpm ? " Panel Focusable sra-item" : " Panel sra-stat"),
+        tabindex: current.bpm ? "0" : undefined, onclick: open, onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }) },
       el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" }, el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description)));
     const event = (rows) => el(doc, "div", { class: c(ACT, "Event", "NoCommentSupport") + " Panel" },
       el(doc, "div", { class: c(ACT, "EventHeadline") + " Panel" },
         el(doc, "div", { class: c(ACT, "EventActorAvatar") + " Panel" }, el(doc, "div", { class: c(AV, "avatarHolder") + " avatarHolder no-drag FillArea online" },
           el(doc, "div", { class: c(AV, "avatarStatus") + " avatarStatus right" }), me?.avatar_url_full && el(doc, "img", { class: c(AV, "avatar") + " avatar", src: me.avatar_url_full, alt: "" }))),
-        el(doc, "span", { class: c(ACT, "SpanEvent") }, el(doc, "span", { class: c(ACT, "ActorName") }, el(doc, "span", { class: c(N, "playerName") }, me?.m_strPlayerName ?? "You")), " ", el(doc, "span", {}, "achieved"))),
-      el(doc, "div", { class: c(ACT, "EventBody") }, carousel(doc, rows.map(item), c(ACT, "ActivityAchievementUnlocked"))));
+        el(doc, "span", { class: c(ACT, "SpanEvent") }, el(doc, "span", { class: c(ACT, "ActorName") + " online" }, el(doc, "span", { class: c(N, "playerName") }, me?.m_strPlayerName ?? "You")), " ", el(doc, "span", {}, "achieved"))),
+      el(doc, "div", { class: c(ACT, "EventBody") }, current.bpm ? carousel(doc, rows.map(item), c(ACT, "ActivityAchievementUnlocked"))
+        : el(doc, "div", { class: c(ACT, "ActivityAchievementUnlocked") + " Panel", style: "grid-template-columns: repeat(auto-fit, [col-start] minmax(49%, 260px) [col-end])" },
+          rows.map((r) => el(doc, "div", { role: "listitem", style: "display: contents" }, item(r))))));
     const node = section(doc, "Activity", ["AppDetailsSectionHasLabel"], el(doc, "div", { class: c(K.details(), "Body") + " " + c(F, "InnerContainer") },
       el(doc, "div", { class: "Panel" }, days.map((d) => el(doc, "div", { class: c(ACT, "AppActivityDay") },
         el(doc, "h4", { class: c(ACT, "AppActivityDate") + " sra-h2" }, d.day ?? "", el(doc, "div", { class: c(ACT, "Rule") })), el(doc, "div", {}, event(d.rows)))))));
