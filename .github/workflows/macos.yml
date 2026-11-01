@@ -1,0 +1,53 @@
+﻿# Builds the macOS app (signed ad-hoc, like scripts/build-app.sh) and attaches it to a release:
+# automatically when a release is published, or by hand for an existing tag.
+name: macOS build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the zip to (leave empty to only build)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build
+        run: swift build -c release --product SteamRetroAchievements
+
+      - name: Package
+        run: |
+          app="Steam RetroAchievements.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp .build/release/SteamRetroAchievements "$app/Contents/MacOS/"
+          cp Resources/Info.plist "$app/Contents/"
+          cp steam/inject.js Resources/AppIcon.icns "$app/Contents/Resources/"
+          codesign --force --sign - "$app"
+          ditto -c -k --keepParent "$app" steam-retroachievements-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: steam-retroachievements-macos
+          path: steam-retroachievements-macos.zip
+
+      - name: Attach to release
+        if: github.event.release.tag_name || inputs.tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name || inputs.tag }}" steam-retroachievements-macos.zip --clobber --repo "${{ github.repository }}"
