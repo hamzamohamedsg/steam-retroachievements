@@ -22,7 +22,9 @@ final class Spy: @unchecked Sendable { var credentials = false, login = false }
     #expect(!fm.fileExists(atPath: marker.path))
     #expect(!fm.fileExists(atPath: data.path))
     #expect(!fm.fileExists(atPath: log.path))
-    #expect(!fm.fileExists(atPath: app.path))
+    #if os(macOS)
+    #expect(!fm.fileExists(atPath: app.path))  // only macOS moves the app to the Trash; elsewhere the user deletes the folder
+    #endif
     #expect(spy.credentials)
     #expect(spy.login)
 }

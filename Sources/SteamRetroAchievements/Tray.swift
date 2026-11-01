@@ -5,7 +5,6 @@ import WinSDK
 
 /// The notification-area icon: shows the app is running, and its menu has the status and Quit.
 /// Runs its own Win32 message loop on a background thread, so the main actor keeps serving Steam.
-// shortcut: the icon isn't re-added if Explorer restarts (TaskbarCreated); upgrade if people lose it
 enum Tray {
     static let status = Mutex("Starting")
     static let callbackMessage = UINT(WM_APP + 1)
@@ -26,15 +25,7 @@ enum Tray {
             // A message-only window: it never shows, it only receives the icon's clicks.
             let hwnd = CreateWindowExW(0, className, nil, 0, 0, 0, 0, 0, HWND(bitPattern: -3), nil, instance, nil)
 
-            var nid = notifyData(hwnd)
-            nid.uFlags = UINT(NIF_ICON | NIF_MESSAGE | NIF_TIP)
-            nid.uCallbackMessage = callbackMessage
-            nid.hIcon = LoadIconW(instance, UnsafePointer<WCHAR>(bitPattern: 1))  // icon resource 1, from Resources/AppIcon.rc
-            withUnsafeMutableBytes(of: &nid.szTip) { tip in
-                let text = Array("Steam RetroAchievements".utf16.prefix(127))
-                tip.bindMemory(to: WCHAR.self).baseAddress!.update(from: text, count: text.count)
-            }
-            Shell_NotifyIconW(DWORD(NIM_ADD), &nid)
+            addIcon(hwnd)
 
             var msg = MSG()
             while GetMessageW(&msg, nil, 0, 0) {  // Swift imports BOOL as a Bool, so -1 (error) also continues
@@ -43,6 +34,21 @@ enum Tray {
             }
         }
     }
+
+    private static func addIcon(_ hwnd: HWND?) {
+        var nid = notifyData(hwnd)
+        nid.uFlags = UINT(NIF_ICON | NIF_MESSAGE | NIF_TIP)
+        nid.uCallbackMessage = callbackMessage
+        nid.hIcon = LoadIconW(GetModuleHandleW(nil), UnsafePointer<WCHAR>(bitPattern: 1))  // icon resource 1, from Resources/AppIcon.rc
+        withUnsafeMutableBytes(of: &nid.szTip) { tip in
+            let text = Array("Steam RetroAchievements".utf16.prefix(127))
+            tip.bindMemory(to: WCHAR.self).baseAddress!.update(from: text, count: text.count)
+        }
+        Shell_NotifyIconW(DWORD(NIM_ADD), &nid)
+    }
+
+    /// Explorer broadcasts this when it restarts (or crashes), after which every notification-area icon is gone.
+    private static var taskbarCreated: UINT { "TaskbarCreated".withCString(encodedAs: UTF16.self) { RegisterWindowMessageW($0) } }
 
     private static func notifyData(_ hwnd: HWND?) -> NOTIFYICONDATAW {
         var nid = NOTIFYICONDATAW()
@@ -57,6 +63,10 @@ enum Tray {
             var nid = notifyData(hwnd)
             Shell_NotifyIconW(DWORD(NIM_DELETE), &nid)
             exit(0)
+        }
+        if msg == taskbarCreated {
+            addIcon(hwnd)
+            return 0
         }
         guard msg == callbackMessage else { return DefWindowProcW(hwnd, msg, wParam, lParam) }
         let mouse = UINT(lParam & 0xFFFF)

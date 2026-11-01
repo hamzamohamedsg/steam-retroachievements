@@ -11,7 +11,12 @@ struct PathHasher: Fingerprinting {
 func touch(_ root: URL, _ rel: String) {
     let url = root.appendingPathComponent(rel)
     try! FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    FileManager.default.createFile(atPath: url.path, contents: Data([0]))
+    // Retry: on Windows a just-created file can be briefly locked (virus scanner), and a failed create would otherwise go unnoticed.
+    var failure: Error?
+    for _ in 0..<40 where !FileManager.default.fileExists(atPath: url.path) {
+        do { try Data([0]).write(to: url) } catch { failure = error; Thread.sleep(forTimeInterval: 0.05) }
+    }
+    precondition(FileManager.default.fileExists(atPath: url.path), "could not create \(url.path): \(String(describing: failure))")
 }
 
 func installed(cores: [String]) -> Installed {
@@ -31,7 +36,8 @@ func installed(cores: [String]) -> Installed {
     let smw = items.first { $0.title == "Super Mario World" }, gbc = items.first { $0.title == "game" }, ff7 = items.first { $0.title == "FF7" }
     #expect(smw?.consoleId == 3 && smw?.emulator == .retroarch && smw?.status == .ready)
     #expect(smw?.coreFile?.hasSuffix("/snes9x_libretro.\(Installed.coreExtension)") == true)
-    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.\(Installed.coreExtension)") == true)
+    #expect(gbc?.consoleId == 6 && gbc?.emulator == .retroarch && gbc?.coreFile?.hasSuffix("/gambatte_libretro.\(Installed.coreExtension)") == true,
+            "gbc: \(String(describing: gbc)); root: \(root.path); items: \(items.map(\.romPath))")
     #expect(ff7?.consoleId == 12 && ff7?.emulator == .duckstation && ff7?.status == .ready)
 }
 
@@ -85,3 +91,22 @@ func installed(cores: [String]) -> Installed {
     // The shortcut reads back as the same emulator, core and ROM.
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/mesen_libretro.so", romPath: "/r/nes/a.nes"))
 }
+
+#if os(Windows)
+@Test func steamLibrariesComeFromLibraryFolders() throws {
+    let steam = tempDir()
+    try FileManager.default.createDirectory(at: steam.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
+    let vdf = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\SteamLibrary\"\n\t}\n}\n"
+    try vdf.write(to: steam.appendingPathComponent("steamapps/libraryfolders.vdf"), atomically: true, encoding: .utf8)
+    let libs = Installed.steamLibraries(steamFolder: steam.path.replacingOccurrences(of: "/", with: "\\"))
+    #expect(libs.count == 3 && libs.last == "D:\\SteamLibrary")
+}
+
+@Test func windowsInstallDirsCoverSteamAndDolphin() {
+    let env = ["ProgramFiles": "C:\\Program Files", "ProgramFiles(x86)": "C:\\Program Files (x86)", "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local", "USERPROFILE": "C:\\Users\\u"]
+    let ra = Installed.windowsInstallDirs(for: .retroarch, env: env, steamLibraries: ["D:\\SteamLibrary"])
+    #expect(ra.contains("D:\\SteamLibrary\\steamapps\\common\\RetroArch") && ra.contains("C:\\RetroArch-Win64") && ra.contains("C:\\Program Files (x86)\\RetroArch"))
+    let dolphin = Installed.windowsInstallDirs(for: .dolphin, env: env, steamLibraries: [])
+    #expect(dolphin.contains("C:\\Program Files\\Dolphin-x64") && dolphin.contains("C:\\Users\\u\\scoop\\apps\\dolphin\\current"))
+}
+#endif

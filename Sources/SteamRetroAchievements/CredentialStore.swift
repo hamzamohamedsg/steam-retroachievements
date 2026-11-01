@@ -31,9 +31,42 @@ enum CredentialStore {
     }
 }
 #else
+#if os(Windows)
+/// The RetroAchievements username and Web API key, encrypted with Windows' data protection (DPAPI) so only this Windows account can read them.
+enum CredentialStore {
+    struct Saved: Codable { var username, apiKey: String }
+    static var file: URL { AppPaths.data.appendingPathComponent("credentials.dat") }
+    /// Older versions kept the key as plain JSON; it's re-saved encrypted the first time it's read.
+    static var legacyFile: URL { AppPaths.data.appendingPathComponent("credentials.json") }
+
+    static func load() -> RACredentials? {
+        if let data = try? Data(contentsOf: legacyFile), let s = try? JSONDecoder().decode(Saved.self, from: data) {
+            let c = RACredentials(username: s.username, apiKey: s.apiKey)
+            if (try? save(c)) != nil { try? FileManager.default.removeItem(at: legacyFile) }
+            return c
+        }
+        guard let blob = try? Data(contentsOf: file), let data = Dpapi.unprotect(blob),
+              let s = try? JSONDecoder().decode(Saved.self, from: data) else { return nil }
+        return RACredentials(username: s.username, apiKey: s.apiKey)
+    }
+
+    static func save(_ c: RACredentials) throws {
+        try FileManager.default.createDirectory(at: AppPaths.data, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(Saved(username: c.username, apiKey: c.apiKey))
+        guard let blob = Dpapi.protect(data) else { throw CocoaError(.fileWriteUnknown) }
+        try blob.write(to: file, options: .atomic)
+        try? FileManager.default.removeItem(at: legacyFile)
+    }
+
+    static func delete() {
+        try? FileManager.default.removeItem(at: file)
+        try? FileManager.default.removeItem(at: legacyFile)
+    }
+}
+#else
 /// The RetroAchievements username and Web API key in a file only this user can read.
-// shortcut: a 0600 file (Linux) or the per-user app data folder (Windows) instead of libsecret / Credential Manager,
-// which Steam Deck's Game Mode has no unlocked keyring for; upgrade if a keyring becomes dependable there.
+// shortcut: a 0600 file instead of libsecret, which Steam Deck's Game Mode has no unlocked keyring for;
+// upgrade if a keyring becomes dependable there.
 enum CredentialStore {
     struct Saved: Codable { var username, apiKey: String }
     static var file: URL { AppPaths.data.appendingPathComponent("credentials.json") }
@@ -48,10 +81,11 @@ enum CredentialStore {
         let data = try JSONEncoder().encode(Saved(username: c.username, apiKey: c.apiKey))
         // Create it private before the key goes in, so it is never readable by others.
         _ = FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)  // an older file; no-op on Windows
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)  // an older file
         try data.write(to: file)  // not atomic: keeps the private file rather than replacing it
     }
 
     static func delete() { try? FileManager.default.removeItem(at: file) }
 }
+#endif
 #endif

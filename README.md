@@ -6,7 +6,7 @@ An app for macOS, Linux and Windows that shows your [RetroAchievements](https://
 
 It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (GameCube/Wii), Flycast (Dreamcast), and SkyEmu (Game Boy family). On macOS it's a menu bar app, on Windows a tray icon, and on Linux a background program with no window. Signing in and adding games happen inside Steam on every platform.
 
-> Linux and Windows support is new: both are built, but neither has been run on a Linux or Windows machine yet.
+> Linux and Windows support is new. The Windows build has been run on Windows 11, where it connects to Steam and shows its buttons and sign-in dialog; signing in with a real account and the achievements panel on a game page haven't been checked there yet. The Linux build hasn't been run on a Linux machine yet.
 
 ## How it works
 
@@ -14,7 +14,7 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 - The app adds one small script to Steam's interface. The script draws the panel, and the app does everything else:
   - fingerprints your ROMs with RetroAchievements' own code (rcheevos)
   - talks to the RetroAchievements API
-  - keeps your Web API key: in the macOS Keychain, or on Linux and Windows in a file only your user account can read. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
+  - keeps your Web API key: in the macOS Keychain, on Linux in a file only your user account can read, or on Windows encrypted with your Windows account (DPAPI), so other users and other PCs can't read it. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
 - The app opens no network ports and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
 
 ## Setup
