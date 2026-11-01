@@ -64,7 +64,7 @@ A shortcut with no ROM in its launch options just opens the emulator's menu, so 
 
 - **"Couldn't check this ROM version":** the app can't fingerprint `.chd` or `.7z` files yet. It matched the game by name. Your emulator can still unlock achievements.
 - **"RetroAchievements doesn't recognize this ROM version":** this exact ROM isn't one RetroAchievements supports, so the emulator won't unlock achievements for it.
-- **Subsets:** a game's RetroAchievements subsets (Bonus, Time Attack…) are shown in the same list as the base game, their descriptions starting with the subset's name, and count toward the totals.
+- **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one to open that subset's achievements page. Subsets are separate from the game's own list and totals.
 - **Wrong game:** click **Wrong game?** on the panel and pick the right one. The app remembers your choice.
 - **Panel gone after a Steam update:** restart Steam (macOS: **Restart Steam** in the menu bar). If it's still missing, Steam changed something inside and the app needs an update.
 - **Log file:** `~/Library/Logs/steam-retroachievements.log` on macOS, `~/.local/share/steam-retroachievements/steam-retroachievements.log` on Linux, `%LOCALAPPDATA%\steam-retroachievements\steam-retroachievements.log` on Windows.

@@ -162,46 +162,44 @@ public final class BridgeHandler: BridgeHandling {
     }
 
     /// Cached progress answers at once and a fresh copy is pushed later, unless `fresh` asks to wait for the network.
-    /// The game's subsets are folded into its achievements; a subset that can't be fetched falls back to its cached copy, or is left out.
+    /// Subsets (separate RA games) ride along as nested panels; one that can't be fetched falls back to its cached copy, or is left out.
     private func payload(for r: Resolution, _ shortcut: ShortcutInfo, _ s: Services, fresh: Bool) async -> PanelPayload {
         guard case let .matched(gameId, consoleId, verification) = r else {
             if case let .notMatched(consoleId, verification) = r { return PanelBuilder.notMatched(consoleId: consoleId, verification: verification) }
             return PanelBuilder.hidden()
         }
         let emulator = EmulatorLaunch.parse(exe: shortcut.exe, launchOptions: shortcut.launchOptions)?.emulator.displayName ?? "the emulator"
-        let subsets = ((try? await s.matcher.subsets(gameId: gameId, consoleId: consoleId)) ?? [])
-            .compactMap { e in Titles.subsetName(e.title).map { (id: e.id, name: $0) } }
-        func cached() -> (value: RAGameProgress, savedAt: Date)? {
-            guard let base = s.ra.cachedProgress(gameId: gameId) else { return nil }
-            return (base.value.merging(subsets: subsets.compactMap { sub in s.ra.cachedProgress(gameId: sub.id).map { (sub.name, $0.value) } }), base.savedAt)
+        let subsetIds = ((try? await s.matcher.subsets(gameId: gameId, consoleId: consoleId)) ?? []).map(\.id)
+        @Sendable func build(_ base: RAGameProgress, _ subsets: [RAGameProgress], stale: Bool, savedAt: Date?) -> PanelPayload {
+            var out = PanelBuilder.matched(base, verification: verification, emulatorName: emulator, stale: stale, savedAt: savedAt)
+            out.subsets = subsets.map { PanelBuilder.matched($0, verification: .verified, emulatorName: emulator, stale: false, savedAt: nil) }
+            return out
         }
-        @Sendable func fetch() async throws -> RAGameProgress {
+        @Sendable func fetch() async throws -> PanelPayload {
             let base = try await s.ra.gameProgress(gameId: gameId)
-            var found: [(name: String, progress: RAGameProgress)] = []
-            for sub in subsets {
-                if let p = (try? await s.ra.gameProgress(gameId: sub.id)) ?? s.ra.cachedProgress(gameId: sub.id)?.value { found.append((sub.name, p)) }
+            var subsets: [RAGameProgress] = []
+            for id in subsetIds {
+                if let p = (try? await s.ra.gameProgress(gameId: id)) ?? s.ra.cachedProgress(gameId: id)?.value { subsets.append(p) }
             }
-            return base.merging(subsets: found)
+            return build(base, subsets, stale: false, savedAt: nil)
         }
-        let cachedHit = cached()
-        let cachedPayload = cachedHit.map { PanelBuilder.matched($0.value, verification: verification, emulatorName: emulator, stale: true, savedAt: $0.savedAt) }
+        let cached = s.ra.cachedProgress(gameId: gameId)
+        let cachedPayload = cached.map { build($0.value, subsetIds.compactMap { s.ra.cachedProgress(gameId: $0)?.value }, stale: true, savedAt: $0.savedAt) }
 
         if let cachedPayload, !fresh {
             let push = push, actions = actions, appid = shortcut.appid
             Task {
-                guard let p = try? await fetch() else { return }
-                let payload = PanelBuilder.matched(p, verification: verification, emulatorName: emulator, stale: false, savedAt: nil)
-                guard let json = try? Self.encoder.encode(payload) else { return }
+                guard let payload = try? await fetch(), let json = try? Self.encoder.encode(payload) else { return }
                 actions.log("info", "pushing fresh progress for \(gameId)")
                 await push("window.__sra.update({\"appid\":\(appid),\"payload\":\(String(decoding: json, as: UTF8.self))})")
             }
             return cachedPayload
         }
         do {
-            return PanelBuilder.matched(try await fetch(), verification: verification, emulatorName: emulator, stale: false, savedAt: nil)
+            return try await fetch()
         } catch {
             actions.log("error", "progress \(gameId): \(error)")
-            return PanelBuilder.failed(cached: cachedPayload, savedAt: cachedHit?.savedAt)
+            return PanelBuilder.failed(cached: cachedPayload, savedAt: cached?.savedAt)
         }
     }
 

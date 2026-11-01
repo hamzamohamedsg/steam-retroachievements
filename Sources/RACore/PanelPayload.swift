@@ -10,6 +10,8 @@ public struct PanelPayload: Codable, Equatable, Sendable {
     public var summary: Summary?
     public var achievements: [Row] = []
     public var updatedText: String?
+    /// One full panel per subset of the game, for the clickable subset icons; each opens like the game's own achievements view.
+    public var subsets: [PanelPayload] = []
     public struct Game: Codable, Equatable, Sendable { public var id: Int; public var title, consoleName, iconURL, raURL: String; public var details: [Detail] }
     public struct Detail: Codable, Equatable, Sendable {
         public var label, value: String

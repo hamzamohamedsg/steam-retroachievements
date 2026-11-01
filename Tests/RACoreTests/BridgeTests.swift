@@ -72,19 +72,23 @@ struct EchoHandler: BridgeHandling {
     #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }
 
-@Test func subsetAchievementsJoinTheGame() async throws {
+@Test func subsetsComeAlongAsOwnPanels() async throws {
     let data = tempDir()
     let services = Services(credentials: creds, dataDirectory: data, transport: FakeTransport { _ in (Data(), 500) })
     let cache = DiskCache(directory: data.appendingPathComponent("cache"))
     cache.put("gamelist-7", [smbEntry, bonusEntry])
-    cache.put("progress-1446", progress([ach(1, order: 1, awarded: 5)], players: 10))
-    cache.put("progress-900", progress([ach(2, order: 1, earned: Date(timeIntervalSince1970: 1_457_804_849), awarded: 2), ach(3, order: 2)], players: 4))
+    cache.put("progress-1446", progress([ach(1, order: 1)]))
+    var bonus = progress([ach(2, order: 1, earned: Date(timeIntervalSince1970: 1_457_804_849)), ach(3, order: 2)])
+    bonus.id = 900; bonus.title = bonusEntry.title
+    cache.put("progress-900", bonus)
     let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
     let params = try JSONEncoder().encode(["shortcut": smb()])
     let payload = try JSONDecoder().decode(PanelPayload.self, from: try await handler.handle(method: "getPanel", params: params))
     #expect(payload.game?.id == 1446)
-    #expect(payload.achievements.map(\.id) == [2, 1, 3])  // unlocked first, then locked in order: base before subset
-    #expect(payload.achievements.first { $0.id == 3 }?.description.hasPrefix("[Bonus] ") == true)
-    #expect(payload.summary?.text == "You've unlocked 1/3 (33%)")
-    #expect(payload.achievements.first { $0.id == 2 }?.rarity == 50)  // 2 of the subset's 4 players, not 2 of 10
+    #expect(payload.achievements.map(\.id) == [1])  // the subset's achievements stay out of the game's own list
+    #expect(payload.summary?.text == "You've unlocked 0/1 (0%)")
+    #expect(payload.subsets.count == 1)
+    #expect(payload.subsets[0].game?.title == "Super Mario Bros. [Subset - Bonus]")
+    #expect(payload.subsets[0].achievements.map(\.id) == [2, 3])
+    #expect(payload.subsets[0].summary?.text == "You've unlocked 1/2 (50%)")
 }

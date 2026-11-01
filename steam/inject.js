@@ -127,6 +127,7 @@
   .sra-actions { display: flex; gap: 14px; margin: 8px 0; align-items: center; }
   .sra-btn { background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; border-radius: 2px; padding: 6px 12px; font: inherit; cursor: pointer; }
   .sra-btn:hover { background: #1a9fff; }
+  .sra-subset { cursor: pointer; }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
@@ -249,6 +250,19 @@
       onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard },
     el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
 
+  // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
+  const subsetRow = (doc, p, divider) => {
+    const A = K.ach(), I = K.icon();
+    const items = p.subsets.map((sp) => {
+      const name = /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
+      const earned = sp.achievements.filter((r) => r.unlocked).length;
+      return el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", "Achieved") + " Panel sra-subset", title: `${name}: ${earned} of ${sp.achievements.length}`, onclick: () => openAll(sp) },
+        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: sp.game.iconURL, alt: "" }))));
+    });
+    return el(doc, "div", { class: c(A, "UnachievedSection") + (divider ? " " + c(A, "ShowDivider") : "") },
+      el(doc, "div", { class: c(A, "Label") }, "Subsets"), el(doc, "div", { class: c(A, "Additional") }, el(doc, "div", { class: "sra-iconrow" }, items)));
+  };
+
   // "Locked Achievements"-style row: as many icons as fit, the rest as "+N" (filled in once it's on screen and has a width).
   const iconRow = (doc, label, rows, achieved, divider, p) => {
     const A = K.ach(), wrap = el(doc, "div", { class: "sra-iconrow" });
@@ -284,6 +298,7 @@
     }
     if (unlocked.length > 1) rows.push(iconRow(doc, "Unlocked Achievements", unlocked.slice(1), true, true, p));
     if (locked.length) rows.push(iconRow(doc, "Locked Achievements", locked, false, unlocked.length > 0, p));
+    if (p.subsets?.length) rows.push(subsetRow(doc, p, unlocked.length > 0 || locked.length > 0));
     const body = s && el(doc, "div", { class: c(D, "Body") }, rows,
       el(doc, "button", { class: c(K.button(), "AppDetailsButton", "BottomRight") + " " + steamButton, onclick: () => openAll(p) }, "View My Achievements"));
     return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], highlight, body);
