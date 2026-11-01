@@ -8,6 +8,12 @@ It supports RetroArch, DuckStation (PS1), PCSX2 (PS2), PPSSPP (PSP), Dolphin (Ga
 
 > Linux and Windows support is new. The Windows build has been run on Windows 11, where it connects to Steam and shows its buttons and sign-in dialog; signing in with a real account and the achievements panel on a game page haven't been checked there yet. The Linux build hasn't been run on a Linux machine yet.
 
+![A ROM's page in Steam's library: the game's details on the left, RetroAchievements progress on the right](docs/screenshots/rom-page.png)
+
+| Achievements page | Big Picture mode | Add Games |
+|---|---|---|
+| ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The same game in Big Picture mode](docs/screenshots/big-picture.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
+
 ## How it works
 
 - The app turns on Steam's built-in developer switch: an empty file named `.cef-enable-remote-debugging` in Steam's install folder (inside Steam's app bundle on macOS, `~/.steam/steam` on Linux, the folder with `steam.exe` on Windows). With it, Steam lets local programs talk to its interface on `127.0.0.1:8080`.
