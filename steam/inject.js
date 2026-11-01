@@ -340,17 +340,59 @@
   };
 
 
-  // Replaces Steam's "detailed information is unavailable" box on the left.
+  const pointsText = (p) => [p.summary.pointsText, p.summary.hardcoreText].filter(Boolean).join(" · ");
+
+  // Big Picture's YOUR STUFF: the game's details as a section.
   const detailsSection = (doc, p) => {
     const g = p.game;
-    return section(doc, "Details", ["AppDetailsSectionHasLabel", ...(current?.bpm ? ["RightColumnSection"] : [])], el(doc, "div", { class: c(K.details(), "Body") + " sra-info" },
+    return section(doc, "Details", ["AppDetailsSectionHasLabel", "RightColumnSection"], el(doc, "div", { class: c(K.details(), "Body") + " sra-info" },
       p.notice && el(doc, "div", { class: "sra-notice" }, p.notice),
       el(doc, "dl", {}, el(doc, "dt", {}, "Game"), el(doc, "dd", {}, g.title), g.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)]),
-        p.summary && [el(doc, "dt", {}, "Points"), el(doc, "dd", {}, [p.summary.pointsText, p.summary.hardcoreText].filter(Boolean).join(" · "))]),
-      !current?.bpm && el(doc, "div", { class: "sra-actions" },
-        el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"),
-        el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")),
+        p.summary && [el(doc, "dt", {}, "Points"), el(doc, "dd", {}, pointsText(p))]),
       p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)));
+  };
+
+  // Desktop: the (i) button beside settings, controller and favourite, opening the game-details panel under the play bar, like a Steam game's.
+  const INFO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" class="SVGIcon_Button SVGIcon_Information" width="256px" height="256px" viewBox="0 0 256 256"><polyline class="I" points="86.883,110.957 152.894,110.957 152.894,181.406 177.117,181.406 177.117,202.485 86.883,202.485 86.883,181.775 109.441,181.775 109.441,130.372 86.883,130.372 "></polyline><circle class="I" cx="128.47" cy="67.607" r="25.517"></circle><circle fill="none" stroke="#000000" stroke-width="14" stroke-miterlimit="10" cx="128" cy="128" r="116.833"></circle></svg>';
+  const gameInfo = (doc, p) => {
+    const B = steamUI.classes("GameStatsSection", "MiniAchievements", "AchievementProgressRow");
+    const G = steamUI.classes("AppGameInfoContainer", "AppDetailsCollapsed"), N = steamUI.classes("AssociationList", "GameDescription", "Portrait");
+    const IM = steamUI.classes("GreyBackground", "Visibility", "Visible");
+    if (!B.AppButtonsContainer || !G.AppGameInfoContainer || !N.Portrait) return [];
+    const play = [...doc.querySelectorAll(sel(B.Container))].find((n) => n.matches(sel(B.InPage)));
+    const bars = [...doc.querySelectorAll(sel(B.AppButtonsContainer))];  // the in-page play bar and its sticky copy
+    if (!play || !bars.length) return [];
+    const g = p.game;
+    // The shortcut's own portrait capsule (jpg or png), else the game's RetroAchievements icon.
+    const art = [...(appStore.GetCustomVerticalCapsuleURLs?.(appStore.GetAppOverviewByAppID(current.appid)) ?? []), g.iconURL];
+    let at = 0;
+    const img = el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: art[0], alt: "", onerror: () => { if (++at < art.length) img.src = art[at]; } });
+    const row = (label, value) => el(doc, "div", { class: c(N, "AssociationList") }, el(doc, "div", { class: c(N, "Label") }, `${label}:`),
+      el(doc, "div", { class: c(N, "Association") }, el(doc, "span", { class: c(N, "Name") }, value)));
+    const panel = el(doc, "div", { "data-sra-panel": "" }, el(doc, "div", { class: c(N, "Container") }, el(doc, "div", { class: c(N, "InnerContainer") },
+      el(doc, "div", { class: c(N, "Portrait") }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(N, "PortraitImage", "BoxArt") }, img)),
+      el(doc, "div", { class: c(N, "Description", "SectionContainer") + " sra-info" },
+        p.notice && el(doc, "div", { class: "sra-notice" }, p.notice),
+        el(doc, "div", { class: "sra-actions" },
+          el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"),
+          el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")),
+        p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)),
+      el(doc, "div", { class: c(N, "Stats", "SectionContainer") }, g.details.map((d) => row(d.label, d.value)), p.summary && row("Points", pointsText(p))))));
+    const buttons = bars.map((bar) => {
+      const b = el(doc, "div", { class: c(B, "MenuButton") + " Focusable", "data-sra-panel": "", onclick: () => toggle(!current.infoOpen) });
+      b.innerHTML = `<div class="${c(B, "DotDotDot")}">${INFO_SVG}</div>`;
+      bar.insertBefore(b, bar.querySelector(sel(B.FavoriteButton)));
+      return b;
+    });
+    const toggle = (open) => {
+      current.infoOpen = open;
+      panel.className = c(G, "AppGameInfoContainer", open ? "AppDetailsExpanded" : "AppDetailsCollapsed", "Glassy");
+      panel.style.height = open ? `${panel.firstElementChild.offsetHeight}px` : "0px";
+      for (const b of buttons) { b.classList.toggle((B.MenuActive ?? "sra-active").split(" ")[0], open); b.title = open ? "Hide game details" : "Show game details"; }
+    };
+    play.after(panel);
+    toggle(!!current.infoOpen);  // stays open across re-renders of the same page
+    return [panel, ...buttons];
   };
 
   // The "Achievements 3/35" stat in the play bar, next to Last Played / Play Time (the in-page bar only, like Steam).
@@ -416,10 +458,10 @@
       const notice = K.notice().Body && left.querySelector("." + CSS.escape(K.notice().Body.split(" ")[0]));
       const box = notice?.closest("." + CSS.escape(c(K.details(), "AppDetailsSection").split(" ")[0]));
       if (box) { box.style.display = "none"; box.setAttribute("data-sra-hid", ""); }
-      const details = detailsSection(doc, p), activity = activitySection(doc, p);
-      left.prepend(details, ...(activity ? [activity] : []));
-      current.nodes.push(details, ...(activity ? [activity] : []));
+      const activity = activitySection(doc, p);
+      if (activity) { left.prepend(activity); current.nodes.push(activity); }
     }
+    if (p.game) current.nodes.push(...gameInfo(doc, p));
   };
 
   // ---------------------------------------------------------------- Big Picture (Steam's own game-page markup: docs/steam-internals.md Q14)
