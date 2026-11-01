@@ -75,6 +75,9 @@ import SteamBridge
             Log.info("update available: \(found.version) \(found.page)")
             #if os(Windows)
             Tray.update.withLock { $0 = found }
+            #elseif os(Linux)
+            // No menu on Linux; a missing notify-send just means no notification.
+            runProcess("/usr/bin/env", ["notify-send", "Steam RetroAchievements \(found.version) is out", found.page.absoluteString])
             #endif
         }
     }
