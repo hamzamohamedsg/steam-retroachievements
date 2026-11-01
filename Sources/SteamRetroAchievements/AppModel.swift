@@ -12,6 +12,8 @@ import SteamBridge
 
     var credentials: RACredentials? = CredentialStore.load()
     var steamState: SteamState = .steamNotRunning
+    /// A newer release on GitHub, if there is one.
+    var update: (version: String, page: URL)?
 
     @ObservationIgnored let marker: DebugMarker
     @ObservationIgnored let steam: SteamConnection
@@ -67,6 +69,14 @@ import SteamBridge
         DesktopEntry.install()
         #endif
         Log.info("launched")
+        Task {
+            guard let found = await UpdateChecker.newerRelease() else { return }
+            update = found
+            Log.info("update available: \(found.version) \(found.page)")
+            #if os(Windows)
+            Tray.update.withLock { $0 = found }
+            #endif
+        }
     }
 
     /// nil on success, otherwise the error text for the Settings dialog.

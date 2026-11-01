@@ -9,6 +9,8 @@ enum Tray {
     static let status = Mutex("Starting")
     static let callbackMessage = UINT(WM_APP + 1)
     static let quitCommand = 1
+    static let updateCommand = 2
+    static let update = Mutex<(version: String, page: URL)?>(nil)
 
     static func start() {
         Thread.detachNewThread { run() }
@@ -64,6 +66,10 @@ enum Tray {
             Shell_NotifyIconW(DWORD(NIM_DELETE), &nid)
             exit(0)
         }
+        if msg == UINT(WM_COMMAND), Int(wParam & 0xFFFF) == updateCommand, let page = update.withLock({ $0?.page }) {
+            Task { @MainActor in AppModel.open(page) }
+            return 0
+        }
         if msg == taskbarCreated {
             addIcon(hwnd)
             return 0
@@ -78,6 +84,9 @@ enum Tray {
         let menu = CreatePopupMenu()
         status.withLock { $0 }.withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING | MF_GRAYED), 0, $0) }
         _ = AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
+        if let version = update.withLock({ $0?.version }) {
+            "Update available: \(version)".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(updateCommand), $0) }
+        }
         "Quit Steam RetroAchievements".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(quitCommand), $0) }
         var point = POINT()
         GetCursorPos(&point)

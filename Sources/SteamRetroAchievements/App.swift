@@ -33,6 +33,10 @@ struct MenuContent: View {
         Divider()
         Button("Add Games…") { openInSteam("openAddGames") }.disabled(model.steamState != .connected)
         Button("Settings…") { openInSteam("openSettings") }.disabled(model.steamState != .connected)
+        if let update = model.update {
+            Divider()
+            Button("Update Available: \(update.version)…") { AppModel.open(update.page) }
+        }
         Divider()
         Button("Quit Steam RetroAchievements") { NSApp.terminate(nil) }
     }
