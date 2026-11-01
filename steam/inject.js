@@ -26,7 +26,9 @@
     // Big Picture has its own window and router (Q12); the desktop library otherwise (Q2, Q3).
     surface: () => {
       const bpm = g_PopupManager.GetExistingPopup("SP BPM_uid0")?.m_popup?.document;
-      if (bpm) return { doc: bpm, bpm: true, route: SteamUIStore.GetFocusedWindowInstance?.()?.m_history?.location?.pathname ?? "" };
+      // The Big Picture window's own history; the focused one is null while another app has focus.
+      const history = SteamUIStore.WindowStore?.GamepadUIMainWindowInstance?.m_history ?? SteamUIStore.GetFocusedWindowInstance?.()?.m_history;
+      if (bpm) return { doc: bpm, bpm: true, route: history?.location?.pathname ?? "" };
       const doc = g_PopupManager.GetExistingPopup("SP Desktop_uid0")?.m_popup?.document;
       return doc ? { doc, bpm: false, route: MainWindowBrowserManager?.m_lastLocation?.pathname ?? "" } : null;
     },
@@ -111,29 +113,15 @@
 
   // ---------------------------------------------------------------- drawing helpers
   const CSS_TEXT = `
-  .sra-panel { font-family: "Motiva Sans", Arial, Helvetica, sans-serif; color: #c6d4df; margin: 0 0 16px; padding: 12px 14px;
-    background: rgba(0, 0, 0, 0.2); border-radius: 2px; font-size: 13px; line-height: 1.4; }
   .sra-head { font-size: 14px; color: rgb(148, 161, 166); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
-  .sra-game { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
-  .sra-game img { width: 40px; height: 40px; border-radius: 2px; }
-  .sra-game-title { color: #fff; font-size: 15px; }
   .sra-muted { color: #8b929b; font-size: 12px; }
   .sra-link { color: #67c1f5; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; font-size: 12px; }
   .sra-link:hover { color: #fff; }
   .sra-notice { background: rgba(255, 196, 0, 0.12); border-left: 3px solid #e5b50d; color: #e8d9a8; padding: 6px 8px; margin: 0 0 10px; font-size: 12px; }
-  .sra-summary { color: #fff; }
-  .sra-bar { height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 6px 0; overflow: hidden; }
-  .sra-bar > div { height: 100%; background: linear-gradient(90deg, #1a9fff, #67c1f5); }
   .sra-actions { display: flex; gap: 14px; margin: 8px 0; align-items: center; }
   .sra-btn { background: rgba(255, 255, 255, 0.1); color: #fff; border: 0; border-radius: 2px; padding: 6px 12px; font: inherit; cursor: pointer; }
   .sra-btn:hover { background: #1a9fff; }
   .sra-subset { cursor: pointer; }
-  .sra-sets { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 12px; }
-  .sra-set { display: flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.06); color: #fff; border: 2px solid transparent; border-radius: 4px; padding: 6px 12px 6px 6px; font: inherit; cursor: pointer; }
-  .sra-set img { width: 48px; height: 48px; border-radius: 3px; }
-  .sra-set.sra-active { border-color: #1a9fff; background: rgba(26, 159, 255, 0.2); }
-  .sra-set:focus, .sra-set:hover { border-color: #67c1f5; outline: none; }
-  .sra-bpm .sra-row:focus { outline: 3px solid #67c1f5; background: rgba(103, 193, 245, 0.18); }
   .sra-details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-top: 8px; font-size: 12px; }
   .sra-details dt { color: #8b929b; } .sra-details dd { margin: 0; color: #c6d4df; }
   .sra-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; }
@@ -150,9 +138,6 @@
   .sra-search { display: flex; gap: 8px; padding: 12px 16px 0; }
   .sra-search select, .sra-search input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
   .sra-search input { flex: 1; }
-  .sra-bpm { font-size: 17px; margin: 16px 2.8vw; } .sra-bpm .sra-row { background: rgba(255, 255, 255, 0.06); }
-  .sra-bpm .sra-head { font-size: 17px; } .sra-bpm .sra-muted, .sra-bpm .sra-details { font-size: 15px; }
-  .sra-bpm .sra-summary { font-size: 19px; } .sra-bpm .sra-game-title { font-size: 22px; } .sra-bpm .sra-notice { font-size: 15px; }
   .sra-btn:disabled, .sra-btn:disabled:hover { opacity: 0.5; cursor: default; background: rgba(255, 255, 255, 0.1); }
   .sra-btn.sra-danger:hover { background: #c4302b; }
   .sra-input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
@@ -177,6 +162,8 @@
   .sra-stat { cursor: pointer; }
   .sra-btn.sra-addgames { margin-left: 8px; background: none; color: #8b929b; font-size: 12px; padding: 4px 6px; }
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
+  /* Steam's focus ring comes from its React Focusable, which our items don't have; this stands in for it. */
+  .sra-carousel .sra-item { cursor: pointer; } .sra-item:focus { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; }
   `;
 
   const el = (doc, tag, props = {}, ...children) => {
@@ -238,10 +225,13 @@
   const hideCard = () => { hoverCard?.remove(); hoverCard = null; };
 
   // Big Picture's controller navigation only reaches elements registered in Steam's focus tree (what its own Focusable component does):
-  // a node under the nearest registered ancestor, then the element. A failure just leaves the buttons mouse/touch-only.
+  // a node under the nearest registered ancestor, then the element. A failure just leaves the items mouse/touch-only.
   let navCleanups = [];
-  const FLOW_ROW = 2;  // Steam's layout enum: NONE, COLUMN, ROW, ...
-  const registerNav = (doc, root) => {
+  const FLOW_COLUMN = 1, FLOW_ROW = 2;  // Steam's layout enum: NONE, COLUMN, ROW, ...
+  const BTN = { OK: 1, CANCEL: 2, BUMPER_LEFT: 5, BUMPER_RIGHT: 6, DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 };  // Steam's gamepad buttons
+  const handled = (e) => { e.stopPropagation(); e.preventDefault(); };  // how Steam's own handlers claim a button
+  // Each .sra-carousel is a row (left/right) and each .sra-column a column (up/down) of .sra-item; returns the items' nodes in order.
+  const registerNav = (doc, root, cleanups = navCleanups, actions = { [BTN.OK]: "View My Achievements" }) => {
     try {
       const context = FocusNavController.m_rgAllContexts.find((x) => x.m_rootWindow === doc.defaultView);
       const deepest = (node) => node.m_rgChildren.reduce((best, ch) => deepest(ch) ?? best, node.m_element?.contains(root) ? node : null);
@@ -251,19 +241,21 @@
       const add = (under, element, props) => {
         const node = under.Tree.CreateNode(under, undefined);
         node.SetProperties(props);
-        navCleanups.push(under.Tree.RegisterNavigationItem(node, element));
+        cleanups.push(under.Tree.RegisterNavigationItem(node, element));
         return node;
       };
-      // The subset icons form a row (left/right between them); the achievements below stay a column (up/down).
-      const row = root.querySelector(".sra-sets");
-      const rowNode = row && add(parent, row, { focusable: false, layout: FLOW_ROW })  // a group: focus goes to its icons, not to it;
-      return [...root.querySelectorAll(".sra-set, .sra-row")].map((el) => {
-        // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
-        el.addEventListener("vgp_onok", () => el.click());
-        return add(el.classList.contains("sra-set") ? rowNode : parent, el, { focusable: "self", onOKActionDescription: el.title });
+      return [...root.querySelectorAll(".sra-carousel, .sra-column")].flatMap((group) => {
+        // A group: focus goes to its items, not to it.
+        const groupNode = add(parent, group, { focusable: false, layout: group.classList.contains("sra-carousel") ? FLOW_ROW : FLOW_COLUMN });
+        return [...group.querySelectorAll(".sra-item")].map((item) => {
+          // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
+          item.addEventListener("vgp_onok", (e) => { handled(e); item.click(); });
+          return (item.sraNode = add(groupNode, item, { focusable: true, actionDescriptionMap: actions }));
+        });
       });
     } catch (e) { log("error", `controller focus unavailable: ${e?.message ?? e}`); return []; }
   };
+  const takeFocus = (node) => { try { node?.BTakeFocus(); } catch (_) {} };
 
   const removePanel = () => {
     navCleanups.reverse().forEach((fn) => { try { fn(); } catch (_) {} });  // children before their group
@@ -317,16 +309,22 @@
     return node;
   };
 
-  const achievementsSection = (doc, p) => {
+  // "You've unlocked 3/35 (8%)" over a progress bar.
+  const progressHighlight = (doc, p) => {
     const A = K.ach(), D = K.details(), s = p.summary;
-    const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
     const fill = el(doc, "div", { class: c(A, "AchievementProgress") });
     fill.style.width = `${s?.percent ?? 0}%`;
-    const highlight = el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv") },
+    return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv") },
       el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, s.text.replace(/\s*\(\d+%\)$/, "")), " ",
         el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`)] : el(doc, "span", {}, p.message)),
       s && el(doc, "div", { class: c(A, "AchievementProgressContainer") }, fill),
       el(doc, "div", { class: c(A, "GlobalStatLabel") }));
+  };
+
+  const achievementsSection = (doc, p) => {
+    const A = K.ach(), D = K.details(), s = p.summary;
+    const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
+    const highlight = progressHighlight(doc, p);
     const rows = [];
     if (unlocked.length) {
       const r = unlocked[0];  // most recent first (PanelBuilder sorts)
@@ -345,11 +343,11 @@
   // Replaces Steam's "detailed information is unavailable" box on the left.
   const detailsSection = (doc, p) => {
     const g = p.game;
-    return section(doc, "Details", ["AppDetailsSectionHasLabel"], el(doc, "div", { class: c(K.details(), "Body") + " sra-info" },
+    return section(doc, "Details", ["AppDetailsSectionHasLabel", ...(current?.bpm ? ["RightColumnSection"] : [])], el(doc, "div", { class: c(K.details(), "Body") + " sra-info" },
       p.notice && el(doc, "div", { class: "sra-notice" }, p.notice),
       el(doc, "dl", {}, el(doc, "dt", {}, "Game"), el(doc, "dd", {}, g.title), g.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)]),
         p.summary && [el(doc, "dt", {}, "Points"), el(doc, "dd", {}, [p.summary.pointsText, p.summary.hardcoreText].filter(Boolean).join(" · "))]),
-      el(doc, "div", { class: "sra-actions" },
+      !current?.bpm && el(doc, "div", { class: "sra-actions" },
         el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"),
         el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")),
       p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)));
@@ -376,15 +374,18 @@
     return node;
   };
 
-  const messageSection = (doc, p) => section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"],
-    el(doc, "div", { class: c(K.details(), "Body") + " sra-message" }, el(doc, "div", {}, p.message),
-      p.state === "signedOut" && el(doc, "button", { class: steamButton, onclick: () => openSettings() }, "Sign In"),
-      p.state === "notMatched" && el(doc, "button", { class: steamButton, onclick: () => openChooser(p.consoleId) }, "Choose game")));
+  // Signing in and choosing the game happen on the desktop library page; Big Picture only says so.
+  const messageSection = (doc, p) => section(doc, current?.bpm ? "Achievements" : "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"],
+    el(doc, "div", { class: c(K.details(), "Body") + " sra-message" },
+      el(doc, "div", {}, current?.bpm && (p.state === "signedOut" || p.state === "notMatched") ? `${p.message} Do this on the desktop library page.` : p.message),
+      !current?.bpm && p.state === "signedOut" && el(doc, "button", { class: steamButton, onclick: () => openSettings() }, "Sign In"),
+      !current?.bpm && p.state === "notMatched" && el(doc, "button", { class: steamButton, onclick: () => openChooser(p.consoleId) }, "Choose game")));
 
   const render = (payload) => {
     const doc = steamUI.doc();
     if (!doc || !current) return;
     current.payload = payload;
+    const refocus = current.bpm && current.tab === bpmTab(doc) ? [...doc.querySelectorAll("[data-sra-panel] .sra-item")].indexOf(doc.activeElement) : -1;
     removePanel();
     current.nodes = [];
     if (payload.state === "hidden") return;
@@ -392,10 +393,15 @@
     if (!host) return;
     ensureStyle(doc);
     if (current.bpm) {
-      const block = host.insertBefore(bpmBlock(doc, payload), host.firstChild);
-      current.nodes.push(block);
-      const focusNodes = registerNav(doc, block);
-      if (current.refocus != null) { focusNodes[current.refocus]?.BTakeFocus?.(); current.refocus = null; }  // the click rebuilt the buttons
+      // Like a Steam game: unlocks in the ACTIVITY feed, the achievements section and details under YOUR STUFF.
+      const tab = bpmTab(doc), p = payload, S = steamUI.classes("SeekTarget", "SpotlightLeftColumn").SeekTarget;
+      const nodes = (tab === 0 ? [p.game ? bpmActivity(doc, p) : messageSection(doc, p)]
+        : tab === 1 ? [p.summary ? bpmStuff(doc, p) : messageSection(doc, p), p.game && detailsSection(doc, p)] : []).filter(Boolean);
+      ((S && host.querySelector(sel(S))) ?? host).prepend(...nodes);
+      current.nodes.push(...nodes);
+      current.tab = tab;
+      const items = nodes.flatMap((n) => registerNav(doc, n));
+      if (refocus >= 0) takeFocus(items[refocus]);  // the update rebuilt the item that had focus
       return;
     }
 
@@ -416,50 +422,83 @@
     }
   };
 
-  const bpmSummary = (doc, summary) => {
-    if (!summary) return [];
-    const fill = el(doc, "div");
-    fill.style.width = `${summary.percent}%`;
-    return [el(doc, "div", { class: "sra-summary" }, summary.text), el(doc, "div", { class: "sra-bar" }, fill),
-      el(doc, "div", { class: "sra-muted" }, [summary.pointsText, summary.hardcoreText].filter(Boolean).join(" · "))];
-  };
-  const bpmRow = (doc, row) =>
-    el(doc, "div", { class: "sra-row" + (row.unlocked ? "" : " sra-locked") + (row.hardcore ? " sra-hc" : ""), tabindex: "-1" },
-      el(doc, "img", { src: row.badgeURL, alt: "" }),
-      el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, row.title), el(doc, "div", { class: "sra-muted" }, row.description), row.rarityText && el(doc, "div", { class: "sra-muted" }, row.rarityText)),
-      el(doc, "div", { class: "sra-row-side" }, `${row.points} points`, row.unlockedText && el(doc, "div", {}, row.unlockedText)));
-
-  // Big Picture's game page shares one content area between its tabs (ACTIVITY, YOUR STUFF, COMMUNITY, GAME INFO); ours belongs on the first.
-  const bpmOnActivity = (doc) => {
+  // ---------------------------------------------------------------- Big Picture (Steam's own game-page markup: docs/steam-internals.md Q14)
+  // Selected tab of Big Picture's game page (0 ACTIVITY, 1 YOUR STUFF, ...); the achievements page's own tabs don't count.
+  const bpmTab = (doc) => {
     const T = steamUI.classes("GamepadTabbedPage", "TabRow", "TabTitle");
-    if (!T.Tab || !T.Selected) return true;
-    const tabs = [...doc.querySelectorAll("." + CSS.escape(T.Tab.split(" ")[0]))].filter((t) => t.querySelector("." + CSS.escape(T.TabTitle.split(" ")[0])));
-    const selected = tabs.findIndex((t) => t.classList.contains(T.Selected.split(" ")[0]));
-    return selected <= 0;
+    if (!T.Tab || !T.Selected) return 0;
+    const tabs = [...doc.querySelectorAll(sel(T.Tab))].filter((t) => !t.hasAttribute("data-sra") && t.querySelector(sel(T.TabTitle)));
+    return Math.max(0, tabs.findIndex((t) => t.classList.contains(T.Selected.split(" ")[0])));
   };
 
-  // Big Picture: one scrollable block, no buttons or overlays (controller focus can't reach them reliably).
-  const bpmBlock = (doc, p) => {
-    // The game and its subsets are picked from an icon row; only the picked one's achievements are listed.
-    const sets = [p, ...(p.subsets ?? [])];
-    const at = Math.min(current.bpmSet ?? 0, sets.length - 1), shown = sets[at];
-    const kids = [el(doc, "div", { class: "sra-head" }, "RetroAchievements")];
-    if (sets.length > 1) {
-      kids.push(el(doc, "div", { class: "sra-sets" }, sets.map((set, i) => {
-        const name = i ? subsetName(set) : "Base game";
-        return el(doc, "button", { class: "sra-set Focusable" + (i === at ? " sra-active" : ""), type: "button", tabindex: "0", title: name,
-          onclick: () => { current.bpmSet = i; current.refocus = i; render(current.payload); } },
-          el(doc, "img", { src: set.game.iconURL, alt: "" }), el(doc, "span", {}, name));
-      })));
-    }
-    if (shown.game) kids.push(el(doc, "div", { class: "sra-game" }, sets.length < 2 && el(doc, "img", { src: shown.game.iconURL, alt: "" }), el(doc, "div", { class: "sra-game-title" }, shown.game.title)));  // the icon row already shows it
-    if (p.message) kids.push(el(doc, "div", { class: "sra-muted" }, p.state === "notMatched" ? `${p.message} Choose the game on the desktop library page.` : p.message));
-    if (p.notice) kids.push(el(doc, "div", { class: "sra-notice" }, p.notice));
-    kids.push(...bpmSummary(doc, shown.summary));
-    if (at === 0 && p.game?.details.length) kids.push(el(doc, "dl", { class: "sra-details" }, p.game.details.flatMap((d) => [el(doc, "dt", {}, d.label), el(doc, "dd", {}, d.value)])));
-    kids.push(...shown.achievements.map((row) => bpmRow(doc, row)));
-    if (p.updatedText) kids.push(el(doc, "div", { class: "sra-muted" }, p.updatedText));
-    return el(doc, "div", { class: "sra-panel sra-bpm", "data-sra-panel": "" }, kids);
+  // A row of items that scrolls sideways (Steam's BoxCarousel, with the inline styles Steam gives it).
+  const carousel = (doc, items, extraClass = "") => {
+    const C = steamUI.classes("BoxCarousel", "BoxCarouselContents", "ListElement");
+    return el(doc, "div", { style: "margin: 0 -10px" }, el(doc, "div", { class: "Panel sra-carousel" },
+      el(doc, "div", { class: c(steamUI.classes("FocusRingRoot", "FocusRing"), "FocusRingRoot") }),
+      el(doc, "div", { class: c(C, "BoxCarousel") + " " + extraClass },
+        el(doc, "div", { class: c(C, "BoxCarouselContents"), style: "padding: 0 10px; scroll-padding: 0 10px" },
+          el(doc, "div", { class: c(C, "ListElement"), role: "list", style: "display: contents" }, items.map((i) => el(doc, "div", { role: "listitem", style: "display: contents" }, i)))))));
+  };
+
+  // The focused icon opens into a card with its name, description and rarity, like Steam's; one per carousel.
+  const detail = (item) => {
+    const A = K.ach(), r = item.sraRow;
+    for (const n of item.closest(".sra-carousel").querySelectorAll(".sra-item")) { n.classList.remove(...c(A, "Detailed").split(" ").filter(Boolean)); n.querySelector(".sra-card")?.remove(); }
+    item.classList.add(...c(A, "Detailed").split(" ").filter(Boolean));
+    item.append(el(item.ownerDocument, "div", { class: c(A, "AchivementCarouselItemDetails") + " sra-card" }, el(item.ownerDocument, "div", { class: c(A, "Name") }, r.title),
+      el(item.ownerDocument, "div", { class: c(A, "Description") }, r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, r.rarityText ?? "")));
+  };
+  const carouselItem = (doc, r, open, big) => {
+    const A = K.ach(), I = K.icon();
+    const item = el(doc, "div", { class: c(A, "AchievementCarouselItem") + " Panel Focusable sra-item", role: "button", tabindex: "0", "aria-label": r.title, onclick: open,
+        onfocus: () => { detail(item); item.scrollIntoView({ block: "nearest", inline: "nearest" }); } },
+      el(doc, "div", { class: c(A, r.unlocked ? "Achieved" : "NotAchieved") + " Panel" }, el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" },
+        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })))));
+    item.sraRow = r;
+    return item;
+  };
+
+  // YOUR STUFF: Steam's Achievements section; unlocked icons, then locked, then one icon per subset. A opens the achievements page.
+  const bpmStuff = (doc, p) => {
+    const A = K.ach(), D = K.details(), open = () => openAll(p);
+    const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
+    const label = (text) => el(doc, "h3", { class: c(A, "LockedAchievementsLabel") + " sra-h2" }, text);
+    const parts = [];
+    if (unlocked.length) parts.push(carousel(doc, unlocked.map((r) => carouselItem(doc, r, open, true))));
+    if (locked.length) parts.push(label("Locked Achievements"), carousel(doc, locked.map((r) => carouselItem(doc, r, open, false))));
+    if (p.subsets?.length) parts.push(label("Subsets"), carousel(doc, p.subsets.map((sp) => carouselItem(doc, { title: subsetName(sp), description: sp.game?.title ?? "",
+      badgeURL: sp.game?.iconURL, unlocked: true, rarityText: sp.summary?.text ?? sp.message }, () => openAll(sp), true))));
+    const first = parts[0].querySelector(".sra-item");
+    if (first) detail(first);  // the most recent unlock, before anything has focus
+    return section(doc, "Achievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], progressHighlight(doc, p),
+      el(doc, "div", { class: c(D, "Body") + " " + c(A, "BodyStopJiggle", "BasicAppDetailsAchievementsSectionBody") }, parts));
+  };
+
+  // ACTIVITY: "<you> achieved" events, one per day with unlocks, newest first, in Steam's activity feed markup.
+  const bpmActivity = (doc, p) => {
+    const unlocked = p.achievements.filter((r) => r.unlocked);
+    if (!unlocked.length) return null;
+    const ACT = steamUI.classes("AppActivityDay", "EventHeadline"), F = steamUI.classes("ActivityFeedContainer", "Rollup", "FetchMoreContainer");
+    const AV = steamUI.classes("avatarHolder", "avatarStatus", "avatarFrame"), N = steamUI.classes("playerName", "statusAndName");
+    const A = K.ach(), I = K.icon(), me = window.friendStore?.m_FriendsUIFriendStore?.self?.persona, open = () => openAll(p);
+    const days = [];
+    for (const r of unlocked) { const last = days.at(-1); last && last.day === r.unlockedDay ? last.rows.push(r) : days.push({ day: r.unlockedDay, rows: [r] }); }
+    const item = (r) => el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + " Panel Focusable sra-item", tabindex: "0", onclick: open,
+        onfocus: () => item.scrollIntoView({ block: "nearest", inline: "nearest" }) },
+      el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" }, el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
+      el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description)));
+    const event = (rows) => el(doc, "div", { class: c(ACT, "Event", "NoCommentSupport") + " Panel" },
+      el(doc, "div", { class: c(ACT, "EventHeadline") + " Panel" },
+        el(doc, "div", { class: c(ACT, "EventActorAvatar") + " Panel" }, el(doc, "div", { class: c(AV, "avatarHolder") + " avatarHolder no-drag FillArea online" },
+          el(doc, "div", { class: c(AV, "avatarStatus") + " avatarStatus right" }), me?.avatar_url_full && el(doc, "img", { class: c(AV, "avatar") + " avatar", src: me.avatar_url_full, alt: "" }))),
+        el(doc, "span", { class: c(ACT, "SpanEvent") }, el(doc, "span", { class: c(ACT, "ActorName") }, el(doc, "span", { class: c(N, "playerName") }, me?.m_strPlayerName ?? "You")), " ", el(doc, "span", {}, "achieved"))),
+      el(doc, "div", { class: c(ACT, "EventBody") }, carousel(doc, rows.map(item), c(ACT, "ActivityAchievementUnlocked"))));
+    const node = section(doc, "Activity", ["AppDetailsSectionHasLabel"], el(doc, "div", { class: c(K.details(), "Body") + " " + c(F, "InnerContainer") },
+      el(doc, "div", { class: "Panel" }, days.map((d) => el(doc, "div", { class: c(ACT, "AppActivityDay") },
+        el(doc, "h4", { class: c(ACT, "AppActivityDate") + " sra-h2" }, d.day ?? "", el(doc, "div", { class: c(ACT, "Rule") })), el(doc, "div", {}, event(d.rows)))))));
+    node.classList.add(...c(F, "ActivityFeedContainer").split(" ").filter(Boolean));
+    return node;
   };
 
   // ---------------------------------------------------------------- overlays
@@ -484,6 +523,7 @@
     if (!doc || !p.game) return;
     closeOverlay?.();
     hideCard();
+    const opener = doc.activeElement?.sraNode, nav = [];  // Big Picture: the focused item, to return to on close
     const O = steamUI.classes("AchievementsOverlayContainer", "AchievementsPageContainer", "CloseButton");
     const G = steamUI.classes("GamepadPage", "Flexed", "OverflowHidden");
     const P = steamUI.classes("HeaderContainer", "AchievementTabs", "MyAchievementsHeader");
@@ -508,8 +548,9 @@
       el(doc, "div", { class: c(T, "Tab", "RightAddon") + " Panel", "data-tab": id, onclick: () => { tab = id; draw(); } }, el(doc, "span", { class: c(T, "TabTitle") }, title)));
     const search = el(doc, "input", { class: "DialogInput DialogInputPlaceholder DialogTextInputBase Focusable", placeholder: "Search", type: "text",
       oninput: () => { query = search.value.trim().toLowerCase(); draw(); } });
-    const list = el(doc, "div", {});
-    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel sra-li" }, el(doc, "div", { class: c(L, "Container") },
+    const list = el(doc, "div", { class: "sra-column" });
+    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel Focusable sra-li sra-item", tabindex: "-1",
+        onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
       el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
         el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, r.description),
@@ -520,10 +561,21 @@
     const draw = () => {
       tabs.forEach((t) => { t.className = c(T, "Tab", "RightAddon", ...(t.dataset.tab === tab ? ["Selected"] : [])) + " Panel"; });
       const rows = p.achievements.filter((r) => !query || `${r.title} ${r.description}`.toLowerCase().includes(query));
-      if (tab === "global") return list.replaceChildren(...[...rows].sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).map(row));
       const locked = rows.filter((r) => !r.unlocked);
-      list.replaceChildren(...rows.filter((r) => r.unlocked).map(row), ...(locked.length ? [el(doc, "div", { class: c(L, "ListTitle") }, "Locked Achievements")] : []), ...locked.map(row));
+      list.replaceChildren(...(tab === "global" ? [...rows].sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).map(row)
+        : [...rows.filter((r) => r.unlocked).map(row), ...(locked.length ? [el(doc, "div", { class: c(L, "ListTitle") }, "Locked Achievements")] : []), ...locked.map(row)]));
+      if (!current?.bpm || !node.isConnected) return;
+      unregister();
+      takeFocus(registerNav(doc, node, nav, { [BTN.CANCEL]: "Back" })[0]);  // the rows are a column; LB/RB switch tabs, B closes
     };
+    const unregister = () => { nav.reverse().forEach((fn) => { try { fn(); } catch (_) {} }); nav.length = 0; };
+    // Steam sends the controller's buttons to the focused row; claim the ones that would leave the page behind it.
+    const onPad = safe((e) => {
+      const b = e.detail?.button, items = [...list.querySelectorAll(".sra-item")], at = items.indexOf(doc.activeElement);
+      if (b === BTN.CANCEL) { handled(e); close(); }
+      else if (b === BTN.BUMPER_LEFT || b === BTN.BUMPER_RIGHT) { handled(e); tab = b === BTN.BUMPER_LEFT ? "my" : "global"; draw(); }
+      else if (b === BTN.DIR_LEFT || b === BTN.DIR_RIGHT || (b === BTN.DIR_UP && at <= 0) || (b === BTN.DIR_DOWN && at === items.length - 1)) handled(e);
+    });
 
     const header = el(doc, "div", { class: c(P, "HeaderContainer") + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
       el(doc, "div", { class: c(H, "Title") }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
@@ -553,8 +605,9 @@
               el(doc, "div", { class: c(P, "Container") + " Panel" }, header, el(doc, "div", { class: c(P, "AchievementTabs") + " Panel" }, tabbed)))),
           closeButton)));
     const onKey = safe((e) => { if (e.key === "Escape") close(); });
-    const close = () => { node.remove(); doc.removeEventListener("keydown", onKey, true); closeOverlay = null; };
+    const close = () => { unregister(); node.remove(); doc.removeEventListener("keydown", onKey, true); closeOverlay = null; takeFocus(opener); };
     doc.addEventListener("keydown", onKey, true);
+    node.addEventListener("vgp_onbuttondown", onPad);
     (steamUI.findClass(doc, "AppDetailsMain") ?? doc.body).append(node);
     closeOverlay = close;
     draw();
@@ -741,10 +794,9 @@
       closeOverlay?.();
       current = appid && steamUI.isShortcut(appid) ? { appid, bpm: surface.bpm, shortcut: null, payload: null } : null;
       if (current) load(appid, "getPanel");
-    } else if (current?.payload && current.payload.state !== "hidden" && current.nodes?.some((n) => !n.isConnected)) {
-      render(current.payload);   // Steam re-rendered the page and dropped our node
+    } else if (current?.payload && current.payload.state !== "hidden" && (current.nodes?.some((n) => !n.isConnected) || (current.bpm && current.tab !== bpmTab(doc)))) {
+      render(current.payload);   // Steam re-rendered the page and dropped our node, or Big Picture switched tabs
     }
-    if (surface.bpm && current?.nodes) { const show = bpmOnActivity(doc); for (const n of current.nodes) n.style.display = show ? "" : "none"; }
     if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }
   });
 
@@ -788,6 +840,7 @@
       clearInterval(interval);
       try { lifetime?.unregister?.(); } catch (_) {}
       closeOverlay?.();
+      removePanel();
       steamUI.doc()?.querySelectorAll("[data-sra]").forEach((n) => n.remove());
       for (const p of pending.values()) clearTimeout(p.timer);
       pending.clear();

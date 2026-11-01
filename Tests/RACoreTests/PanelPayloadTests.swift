@@ -46,6 +46,8 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     #expect(locked.badgeURL == "https://media.retroachievements.org/Badge/b1_lock.png")
     #expect(unlocked.badgeURL == "https://media.retroachievements.org/Badge/b2.png")
     #expect(unlocked.unlockedText == "Unlocked Jan 1, 1970 at 12:00\u{202F}AM")
+    #expect(unlocked.unlockedDay == "January 1, 1970")
+    #expect(locked.unlockedDay == nil)
     #expect(build(progress([ach(1, order: 1)], players: 0)).achievements[0].rarityText == nil)
 }
 

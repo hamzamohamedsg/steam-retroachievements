@@ -25,6 +25,8 @@ public struct PanelPayload: Codable, Equatable, Sendable {
         public var badgeURL: String
         public var unlocked, hardcore: Bool
         public var unlockedText, rarityText: String?
+        /// The unlock's day ("August 31", with the year when it isn't this one), for Big Picture's activity feed.
+        public var unlockedDay: String?
         /// Percent of players who have it, for sorting the Global Achievements tab.
         public var rarity: Double?
     }
@@ -56,6 +58,12 @@ public enum PanelBuilder {
         let unlocked = p.achievements.filter { earned($0) != nil }.sorted { earned($0)! > earned($1)! }
         let locked = p.achievements.filter { earned($0) == nil }.sorted { $0.displayOrder < $1.displayOrder }
         let full = formatter(.medium, .short, timeZone, locale)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let thisYear = formatter(.none, .none, timeZone, locale), otherYear = formatter(.none, .none, timeZone, locale)
+        thisYear.setLocalizedDateFormatFromTemplate("MMMMd")
+        otherYear.setLocalizedDateFormatFromTemplate("yMMMMd")
+        let day = { (d: Date) in (calendar.isDate(d, equalTo: Date(), toGranularity: .year) ? thisYear : otherYear).string(from: d) }
         let rarity = { (a: RAAchievement) in p.numDistinctPlayers > 0 ? Double(a.numAwarded) * 100 / Double(p.numDistinctPlayers) : nil }
         out.achievements = (unlocked + locked).map { a in
             let isUnlocked = earned(a) != nil
@@ -63,7 +71,8 @@ public enum PanelBuilder {
                          badgeURL: "\(media)/Badge/\(a.badgeName)\(isUnlocked ? "" : "_lock").png",
                          unlocked: isUnlocked, hardcore: a.dateEarnedHardcore != nil,
                          unlockedText: earned(a).map { "Unlocked " + full.string(from: $0) },
-                         rarityText: rarity(a).map { String(format: "%.1f%% of players have this achievement", $0) }, rarity: rarity(a))
+                         rarityText: rarity(a).map { String(format: "%.1f%% of players have this achievement", $0) },
+                         unlockedDay: earned(a).map(day), rarity: rarity(a))
         }
 
         if !p.achievements.isEmpty {
