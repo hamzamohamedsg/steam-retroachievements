@@ -87,6 +87,11 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/duckstation.sh\"", launchOptions: "-batch \"'/r/psx/a.chd'\"")?.romPath == "/r/psx/a.chd")
     #expect(EmulatorLaunch.parse(exe: "/home/deck/Applications/pcsx2-v2.2.0-linux-appimage-x64-Qt.AppImage", launchOptions: "\"/r/a.iso\"")?.emulator == .pcsx2)
     #expect(EmulatorLaunch.parse(exe: "/home/deck/Emulation/tools/launchers/rpcs3.sh", launchOptions: "\"/r/a.iso\"") == nil)
+    // EmuDeck's Steam ROM Manager parsers append the arguments to the Target and leave Launch Options empty.
+    let appended = EmulatorLaunch.parse(exe: "\"/run/media/mmcblk0p1/Emulation/tools/launchers/duckstation.sh\" -batch -fullscreen -nogui \"/r/psx/A (USA).chd\"", launchOptions: "")
+    #expect(appended == EmulatorLaunch(emulator: .duckstation, coreFile: nil, romPath: "/r/psx/A (USA).chd"))
+    let ra = EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/retroarch.sh\" -L /c/snes9x_libretro.so \"/r/snes/a.sfc\"", launchOptions: "")
+    #expect(ra == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/snes9x_libretro.so", romPath: "/r/snes/a.sfc"))
 }
 
 @Test func parsesLinuxAndWindowsPaths() {
