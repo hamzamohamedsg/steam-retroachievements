@@ -33,6 +33,20 @@ let creds = RACredentials(username: "Max Milyin", apiKey: "k&1")
     #expect(p.numDistinctPlayers == 27080)
 }
 
+@Test func decodesRecentlyPlayedAndPlaytime() async throws {
+    let t = FakeTransport { _ in (Data(#"[{"GameID":11332,"ConsoleID":12,"Title":"Final Fantasy Origins","LastPlayed":"2023-10-27 00:30:04","NumAchieved":38}]"#.utf8), 200) }
+    #expect(try await RAClient(credentials: creds, transport: t).recentlyPlayed(offset: 50) == [RARecentGame(gameId: 11332, lastPlayed: Date(timeIntervalSince1970: 1_698_366_604))])
+    #expect(t.urls[0].path == "/API/API_GetUserRecentlyPlayedGames.php")
+    #expect(t.urls[0].query?.contains("c=50&o=50&u=Max%20Milyin") == true)
+    // Games RA has no last-played time for come with null, which mustn't sink the whole page.
+    let nulls = FakeTransport { _ in (Data(#"[{"GameID":1,"LastPlayed":null},{"GameID":2,"LastPlayed":"2023-10-27 00:30:04"}]"#.utf8), 200) }
+    #expect(try await RAClient(credentials: creds, transport: nulls).recentlyPlayed(offset: 0).map(\.lastPlayed) == [nil, Date(timeIntervalSince1970: 1_698_366_604)])
+    // Progress saved before playtime was read (the app's own older cache) has none, so it's fetched again.
+    #expect(try await RAClient(credentials: creds, transport: FakeTransport { _ in (fixture("game-progress"), 200) }).gameProgress(gameId: 1).userTotalPlaytime == nil)
+    let timed = Data(#"{"ID":1,"Title":"T","ConsoleID":1,"Achievements":[],"UserTotalPlaytime":3700}"#.utf8)
+    #expect(try await RAClient(credentials: creds, transport: FakeTransport { _ in (timed, 200) }).gameProgress(gameId: 1).userTotalPlaytime == 3700)
+}
+
 @Test func buildsRequestURL() async throws {
     let t = FakeTransport { _ in (fixture("game-progress"), 200) }
     _ = try await RAClient(credentials: creds, transport: t).gameProgress(gameId: 14402)
@@ -56,6 +70,7 @@ final class CountingRA: RAProviding, @unchecked Sendable {
         return [RAGameListEntry(id: 1, title: "A", consoleId: consoleId, consoleName: "C", imageIcon: "/i.png", numAchievements: 1, hashes: [])]
     }
     func gameProgress(gameId: Int) async throws -> RAGameProgress { fatalError("unused") }
+    func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { [] }
 }
 
 final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_700_000_000) }
@@ -93,6 +108,7 @@ struct ThrowingTransport: HTTPTransport {
 struct FailingRA: RAProviding {
     func gameList(consoleId: Int) async throws -> [RAGameListEntry] { throw RAError.http(503) }
     func gameProgress(gameId: Int) async throws -> RAGameProgress { throw RAError.http(503) }
+    func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { throw RAError.http(503) }
 }
 
 @Test func staleGameListServesWhenRAIsDown() async throws {

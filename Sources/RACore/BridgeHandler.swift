@@ -4,11 +4,13 @@ import Foundation
 public struct Services: Sendable {
     public let ra: CachedRA
     public let matcher: Matcher
+    public let playtimeHistory: PlaytimeHistory
 
     public init(credentials: RACredentials, dataDirectory: URL, transport: HTTPTransport = URLSessionTransport()) {
         ra = CachedRA(client: RAClient(credentials: credentials, transport: transport),
                       cache: DiskCache(directory: dataDirectory.appendingPathComponent("cache")))
         matcher = Matcher(ra: ra, hasher: RomHasher(), store: MatchStore(file: dataDirectory.appendingPathComponent("matches.json")))
+        playtimeHistory = PlaytimeHistory(file: dataDirectory.appendingPathComponent("playtime.json"))
     }
 }
 
@@ -72,6 +74,9 @@ public final class BridgeHandler: BridgeHandling {
         var shortcut: ShortcutSpec?
     }
     struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
+    struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
+    /// Steam's own units: whole minutes, and a Unix time.
+    struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks: Int }
 
     public func handle(method: String, params: Data) async throws -> Data {
         let d = JSONDecoder()
@@ -116,6 +121,10 @@ public final class BridgeHandler: BridgeHandling {
             return Data("null".utf8)
         case "scanGames":
             return try encode(scan(try d.decode(ScanParams.self, from: params)))
+        case "playtimes":
+            let p = try d.decode(PlaytimeParams.self, from: params)
+            guard let s = await services() else { return try encode([Playtime]()) }
+            return try encode(await playtimes(p.shortcuts, s))
         case "openURL":
             let p = try d.decode(URLParams.self, from: params)
             guard BridgeRouter.isAllowedExternalURL(p.url), let url = URL(string: p.url) else { throw BridgeError.urlNotAllowed }
@@ -149,6 +158,38 @@ public final class BridgeHandler: BridgeHandling {
                            emulatorChoices: choices.filter { installed.emulators[$0] != nil }.map { Choice(id: $0.rawValue, name: $0.displayName) },
                            shortcut: item.status == .ready ? Scanner.shortcut(for: item, installed: installed) : nil)
         })
+    }
+
+    static let recentPages = 10
+
+    /// RA's playtime and last-played time for the shortcuts whose games the user has played, for Steam's Play Time and Last Played.
+    /// Progress is fetched only for games played since it was last saved.
+    private func playtimes(_ shortcuts: [ShortcutInfo], _ s: Services) async -> [Playtime] {
+        var lastPlayed: [Int: Date] = [:]
+        // shortcut: reads the 500 most recently played games; older ones keep Steam's own (empty) playtime
+        for page in 0..<Self.recentPages {
+            let games: [RARecentGame]
+            do { games = try await s.ra.recentlyPlayed(offset: page * 50) } catch {
+                actions.log("error", "recently played: \(error)")
+                break
+            }
+            // No last-played time: its playtime still counts, and any saved progress is as new as it gets.
+            for g in games where lastPlayed[g.gameId] == nil { lastPlayed[g.gameId] = g.lastPlayed ?? .distantPast }
+            if games.count < 50 { break }
+        }
+        var out: [Playtime] = []
+        for shortcut in shortcuts {
+            guard case let .matched(gameId, _, _)? = try? await s.matcher.resolve(shortcut), let played = lastPlayed[gameId] else { continue }
+            let cached = s.ra.cachedProgress(gameId: gameId)
+            var progress = cached.flatMap { $0.savedAt > played && $0.value.userTotalPlaytime != nil ? $0.value : nil }
+            if progress == nil { progress = (try? await s.ra.gameProgress(gameId: gameId)) ?? cached?.value }
+            guard let seconds = progress?.userTotalPlaytime else { continue }
+            let twoWeeks = s.playtimeHistory.lastTwoWeeks(gameId: gameId, total: seconds, lastPlayed: played)
+            out.append(Playtime(appid: shortcut.appid, minutes: (seconds + 59) / 60, lastPlayed: max(0, Int(played.timeIntervalSince1970)),
+                                twoWeeks: (twoWeeks + 59) / 60))
+        }
+        actions.log("info", "playtime for \(out.count) of \(shortcuts.count) shortcuts (\(lastPlayed.count) games played)")
+        return out
     }
 
     private func panel(_ shortcut: ShortcutInfo, fresh: Bool) async -> PanelPayload {

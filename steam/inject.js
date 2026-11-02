@@ -151,6 +151,7 @@
   /* Steam-classed panel: only what Steam's classes leave to unlisted helpers (docs/steam-internals.md Q13). */
   :where(.sra-h2) { margin: 0; font: unset; }
   .sra-iconrow { width: 100%; height: 100%; display: flex; flex-direction: row; } .sra-iconrow > div { height: 100%; }
+  .sra-hc img { outline: 2px solid #e5b143; outline-offset: -2px; }  /* RetroAchievements' gold frame for hardcore unlocks (the img is positioned, so it'd cover its wrapper's outline) */
   .sra-li { margin-bottom: 8px; }
   .sra-info { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: #c6d4df; }
   .sra-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 0; }
@@ -201,16 +202,19 @@
     notice: () => steamUI.classes("OfflineButton", "InnerContainer", "Body"),
   };
   const steamButton = "DialogButton _DialogLayout Secondary Focusable";
+  // RetroAchievements counts hardcore and softcore unlocks apart: each unlock says which, and hardcore icons get RA's gold frame.
+  const mode = (r) => r?.unlocked && r.hardcore !== undefined ? (r.hardcore ? "Hardcore" : "Softcore") : null;
+  const hc = (r) => r?.unlocked && r.hardcore ? " sra-hc" : "";
 
   const showCard = (doc, target, row) => {
     hideCard();
     const A = K.ach(), I = K.icon(), H = K.hover(), B = K.hoverBg();
-    const points = `${row.points} points${row.hardcore ? " · hardcore" : ""}`;
+    const points = [`${row.points} points`, mode(row)].filter(Boolean).join(" · ");
     const pos = el(doc, "div", { class: c(H, "HoverPosition", "Ready") },
       el(doc, "div", {}, el(doc, "div", { class: c(B, "AppDetailsHover") + " " + c(A, "Hover") + (row.unlocked ? " " + c(A, "Achieved") : "") },
         el(doc, "div", { class: c(B, "Background") }, el(doc, "div", { class: c(B, "BlurContainer") }, el(doc, "img", { src: row.badgeURL, alt: "" }))),
         el(doc, "div", { class: c(A, "TopSection") },
-          el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "TopSectionAchievementIcon", "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: row.badgeURL, alt: "" })),
+          el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "TopSectionAchievementIcon", "Icon") + hc(row) }, el(doc, "img", { class: c(I, "Icon"), src: row.badgeURL, alt: "" })),
           el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, row.title), el(doc, "div", { class: c(A, "Desc") }, row.description))),
         el(doc, "div", { class: c(A, "Unlocked") }, row.unlockedText && el(doc, "div", {}, row.unlockedText), el(doc, "div", {}, points),
           row.rarityText && el(doc, "div", {}, row.rarityText)))));
@@ -276,7 +280,7 @@
 
   const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel",
       onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard },
-    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
+    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") + hc(row) }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
 
   // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
   const subsetName = (sp) => /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
@@ -413,6 +417,9 @@
         el(doc, "div", { class: c(B, "AchievementProgressRow") }, el(doc, "div", { class: c(B, "PlayBarDetailLabel", "AchievementCountLabel") }, `${earned}/${total}`),
           el(doc, "div", { class: c(B, "DetailsProgressContainer") }, fill))));
     stats.append(node);
+    // Steam adds Last Played and Play Time after ours as they arrive: keep Achievements last, like a Steam game's play bar.
+    const order = new MutationObserver(() => { if (!node.isConnected) order.disconnect(); else if (node.nextSibling) stats.append(node); });
+    order.observe(stats, { childList: true });
     return node;
   };
 
@@ -489,14 +496,14 @@
     for (const n of item.closest(".sra-carousel").querySelectorAll(".sra-item")) { n.classList.remove(...c(A, "Detailed").split(" ").filter(Boolean)); n.querySelector(".sra-card")?.remove(); }
     item.classList.add(...c(A, "Detailed").split(" ").filter(Boolean));
     item.append(el(item.ownerDocument, "div", { class: c(A, "AchivementCarouselItemDetails") + " sra-card" }, el(item.ownerDocument, "div", { class: c(A, "Name") }, r.title),
-      el(item.ownerDocument, "div", { class: c(A, "Description") }, r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, r.rarityText ?? "")));
+      el(item.ownerDocument, "div", { class: c(A, "Description") }, r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, [mode(r), r.rarityText].filter(Boolean).join(" · "))));
   };
   const carouselItem = (doc, r, open, big) => {
     const A = K.ach(), I = K.icon();
     const item = el(doc, "div", { class: c(A, "AchievementCarouselItem") + " Panel Focusable sra-item", role: "button", tabindex: "0", "aria-label": r.title, onclick: open,
         onfocus: () => { detail(item); item.scrollIntoView({ block: "nearest", inline: "nearest" }); } },
       el(doc, "div", { class: c(A, r.unlocked ? "Achieved" : "NotAchieved") + " Panel" }, el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" },
-        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })))));
+        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })))));
     item.sraRow = r;
     return item;
   };
@@ -529,7 +536,7 @@
     for (const r of unlocked) { const last = days.at(-1); last && last.day === r.unlockedDay ? last.rows.push(r) : days.push({ day: r.unlockedDay, rows: [r] }); }
     const item = (r) => el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + (current.bpm ? " Panel Focusable sra-item" : " Panel sra-stat"),
         tabindex: current.bpm ? "0" : undefined, onclick: open, onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }) },
-      el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" }, el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
+      el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" }, el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description)));
     const event = (rows) => el(doc, "div", { class: c(ACT, "Event", "NoCommentSupport") + " Panel" },
       el(doc, "div", { class: c(ACT, "EventHeadline") + " Panel" },
@@ -596,10 +603,10 @@
     const list = el(doc, "div", { class: "sra-column" });
     const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel Focusable sra-li sra-item", tabindex: "-1",
         onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
-      el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
+      el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
         el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, r.description),
-        el(doc, "div", { class: c(L, "AchievementGlobalPercentage", "InBody") }, [`${r.points} points${r.hardcore ? " · hardcore" : ""}`, tab === "my" && r.rarityText].filter(Boolean).join(" · ")))),
+        el(doc, "div", { class: c(L, "AchievementGlobalPercentage", "InBody") }, [`${r.points} points`, mode(r), tab === "my" && r.rarityText].filter(Boolean).join(" · ")))),
       el(doc, "div", { class: c(L, "Right") }, el(doc, "div", { class: c(L, "VerticalContent", "AlignEnd") },
         tab === "global" ? [el(doc, "div", { class: c(L, "ProgressCount") }, r.rarity == null ? "" : `${r.rarity.toFixed(1)}%`), el(doc, "div", { class: c(L, "ProgressBar") }, bar(r.rarity ?? 0))]
           : r.unlocked ? [el(doc, "div", { class: c(L, "UnlockDate") }, r.unlockedText), el(doc, "div", { class: c(L, "ProgressBar") }, bar(100))] : []))));
@@ -695,7 +702,7 @@
   let pendingOpen = null;
   const desktopDoc = () => { const s = steamUI.surface(); return s && !s.bpm ? s.doc : null; };
   const head = (doc, text) => el(doc, "div", { class: "sra-head" }, text);
-  const signedInChanged = () => { if (current) { current.payload = null; load(current.appid, "getPanel"); } };
+  const signedInChanged = () => { syncPlaytimes(); if (current) { current.payload = null; load(current.appid, "getPanel"); } };
 
   const openSettings = safe(async () => {
     const doc = desktopDoc();
@@ -807,6 +814,55 @@
     scan();
   });
 
+  // ---------------------------------------------------------------- playtime (docs/steam-internals.md Q15)
+  // RA's playtime and last-played time go where Steam keeps its own games': the overview (library sorts, Recent Games)
+  // and the details (the play bar's Last Played and Play Time), so Steam draws and sorts them itself.
+  const playtimes = new Map();  // appid → { minutes, lastPlayed }
+  const applyOverview = (ov) => {
+    const t = playtimes.get(ov?.appid);
+    if (!t) return;
+    const last = Math.max(t.lastPlayed, ov.rt_last_time_played || 0);  // a launch through Steam can be newer than RA's last play
+    if (ov.minutes_playtime_forever !== t.minutes) ov.minutes_playtime_forever = t.minutes;
+    if (ov.minutes_playtime_last_two_weeks !== t.twoWeeks) ov.minutes_playtime_last_two_weeks = t.twoWeeks;  // Recent Games' "Last two weeks"
+    if (ov.rt_last_time_played !== last) ov.rt_last_time_played = last;
+    if ((ov.rt_recent_activity_time || 0) < last) ov.rt_recent_activity_time = last;
+  };
+  const applyDetails = (appid) => {
+    const t = playtimes.get(appid), data = appDetailsStore.m_mapAppData.get(appid), d = data?.details;
+    if (!t || !d) return;
+    const last = Math.max(t.lastPlayed, d.rtLastTimePlayed || 0);
+    // A new object: the play bar redraws when the details are replaced, not when a field changes.
+    if (d.nPlaytimeForever !== t.minutes || d.rtLastTimePlayed !== last) data.details = { ...d, nPlaytimeForever: t.minutes, rtLastTimePlayed: last };
+  };
+  // Steam rebuilds an overview from each update it gets: put the values back right after.
+  const overviewProto = (() => {
+    let o = Object.getPrototypeOf(appStore.m_mapApps.values().next().value ?? {});
+    while (o && !Object.prototype.hasOwnProperty.call(o, "InitFromProto")) o = Object.getPrototypeOf(o);
+    return o;
+  })();
+  const initFromProto = overviewProto?.InitFromProto.sraOriginal ?? overviewProto?.InitFromProto;
+  if (initFromProto) {
+    overviewProto.InitFromProto = function (...args) {
+      const r = initFromProto.apply(this, args);
+      try { applyOverview(this); } catch (_) {}
+      return r;
+    };
+    overviewProto.InitFromProto.sraOriginal = initFromProto;
+  }
+  // All shortcuts, or one (after it was played). Shortcuts the app no longer has playtime for go back to none.
+  const syncPlaytimes = safe(async (only) => {
+    const rows = (await call("playtimes", { shortcuts: only ? [only] : await listShortcuts() }, 600000)) ?? [];
+    if (!only) for (const id of playtimes.keys()) if (!rows.some((r) => r.appid === id)) rows.push({ appid: id, minutes: 0, lastPlayed: 0, twoWeeks: 0 });
+    for (const r of rows) {
+      playtimes.set(r.appid, r);
+      applyOverview(appStore.GetAppOverviewByAppID(r.appid));
+      applyDetails(r.appid);
+    }
+  });
+  // shortcut: a game played on another device shows up at the next hourly sync
+  const playtimeInterval = setInterval(() => syncPlaytimes(), 3600000);
+  let playtimesSynced = false;
+
   // ---------------------------------------------------------------- navigation
   const load = safe(async (appid, method) => {
     const shortcut = await steamUI.shortcut(appid);
@@ -832,6 +888,8 @@
 
   let lastDoc = null, lastAppid = null;
   const tick = safe(() => {
+    if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; syncPlaytimes(); }
+    if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     const surface = steamUI.surface();
     if (!surface) return;
     const doc = surface.doc;
@@ -866,9 +924,12 @@
   let lifetime = null;
   try {
     lifetime = SteamClient.GameSessions.RegisterForAppLifetimeNotifications(safe((e) => {
-      if (e && e.bRunning === false && e.unAppID === current?.appid) {
+      if (e && e.bRunning === false && steamUI.isShortcut(e.unAppID)) {
         const appid = e.unAppID;
-        setTimeout(safe(() => { if (current?.appid === appid) load(appid, "refreshPanel"); }), 10000);
+        setTimeout(safe(async () => {
+          syncPlaytimes(await steamUI.shortcut(appid));
+          if (current?.appid === appid) load(appid, "refreshPanel");
+        }), 10000);
       }
     }));
   } catch (e) { log("error", `lifetime notifications unavailable: ${e?.message ?? e}`); }
@@ -891,6 +952,8 @@
     }),
     dispose: safe(() => {
       clearInterval(interval);
+      clearInterval(playtimeInterval);
+      if (initFromProto) overviewProto.InitFromProto = initFromProto;
       try { lifetime?.unregister?.(); } catch (_) {}
       closeOverlay?.();
       removePanel();

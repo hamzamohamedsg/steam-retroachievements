@@ -47,6 +47,47 @@ struct EchoHandler: BridgeHandling {
     #expect(payload.updatedText?.hasPrefix("Last updated") == true)
 }
 
+@Test func playtimesForPlayedShortcuts() async throws {
+    let data = tempDir()
+    var p = progress([ach(1, order: 1)])
+    p.userTotalPlaytime = 3_700
+    let progressJSON = try RADate.encoder.encode(p)
+    let played = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 86_400).rounded(.down))  // yesterday, in the last two weeks
+    let recent = Data(#"[{"GameID":1446,"LastPlayed":"\#(RADate.formatter.string(from: played))"}]"#.utf8)
+    let transport = FakeTransport { url in
+        url.path.hasSuffix("RecentlyPlayedGames.php") ? (recent, 200) : url.path.hasSuffix("UserProgress.php") ? (progressJSON, 200) : (Data(), 500)
+    }
+    let services = Services(credentials: creds, dataDirectory: data, transport: transport)
+    let zelda = RAGameListEntry(id: 1447, title: "Zelda", consoleId: 7, consoleName: "NES/Famicom", imageIcon: "/i.png", numAchievements: 9, hashes: [])
+    DiskCache(directory: data.appendingPathComponent("cache")).put("gamelist-7", [smbEntry, zelda])
+    let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
+    // Zelda matches but was never played, so it gets nothing, like a Steam game with no playtime.
+    let unplayed = ShortcutInfo(appid: 2, name: "Zelda", exe: raExe, launchOptions: "-L \"/c/fceumm_libretro.dylib\" \"/r/nes/Zelda.nes\"")
+    let params = try JSONEncoder().encode(["shortcuts": [smb(), unplayed]])
+    let rows = { () async throws -> [[String: Int]]? in
+        try JSONSerialization.jsonObject(with: try await handler.handle(method: "playtimes", params: params)) as? [[String: Int]]
+    }
+    // A first sync has no earlier total to compare with, so the whole total counts as the last two weeks.
+    #expect(try await rows() == [["appid": 1, "minutes": 62, "lastPlayed": Int(played.timeIntervalSince1970), "twoWeeks": 62]])
+    // The progress saved just now is newer than the last play, so the next sync doesn't fetch it again.
+    let progressCalls = { transport.urls.filter { $0.path.hasSuffix("UserProgress.php") }.count }
+    let before = progressCalls()
+    _ = try await rows()
+    #expect(progressCalls() == before)
+}
+
+@Test func lastTwoWeeksFromSavedTotals() {
+    let file = tempDir().appendingPathComponent("playtime.json"), day: TimeInterval = 86_400
+    let t0 = Date(timeIntervalSince1970: 1_790_000_000)
+    let h = PlaytimeHistory(file: file)
+    // No history from before the window yet: a game played in it gets its whole total, one that wasn't gets nothing.
+    #expect(h.lastTwoWeeks(gameId: 1, total: 6_000, lastPlayed: t0 - day, now: t0) == 6_000)
+    #expect(h.lastTwoWeeks(gameId: 2, total: 9_000, lastPlayed: t0 - 20 * day, now: t0) == 0)
+    // 15 days on, the first total is from before the window: only what was played since counts. The history survives a restart.
+    #expect(PlaytimeHistory(file: file).lastTwoWeeks(gameId: 1, total: 7_200, lastPlayed: t0 + 15 * day, now: t0 + 15 * day) == 1_200)
+    #expect(PlaytimeHistory(file: file).lastTwoWeeks(gameId: 1, total: 7_200, lastPlayed: t0 + 15 * day, now: t0 + 40 * day) == 0)
+}
+
 @Test func routerErrorsAreGeneric() async {
     struct Leaky: BridgeHandling {
         func handle(method: String, params: Data) async throws -> Data { throw URLError(.timedOut, userInfo: [NSURLErrorFailingURLStringErrorKey: "https://x/?y=SECRET"]) }

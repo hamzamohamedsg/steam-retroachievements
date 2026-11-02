@@ -31,6 +31,8 @@ public enum RAError: Error, Equatable { case badCredentials, http(Int), decoding
 public protocol RAProviding: Sendable {
     func gameList(consoleId: Int) async throws -> [RAGameListEntry]
     func gameProgress(gameId: Int) async throws -> RAGameProgress
+    /// 50 games of the user's play history, newest first, starting at `offset`.
+    func recentlyPlayed(offset: Int) async throws -> [RARecentGame]
 }
 
 public final class RAClient: RAProviding {
@@ -51,6 +53,10 @@ public final class RAClient: RAProviding {
 
     public func gameProgress(gameId: Int) async throws -> RAGameProgress {
         try decode(RAGameProgress.self, try await request("API_GetGameInfoAndUserProgress.php", ["g": "\(gameId)", "u": credentials.username]))
+    }
+
+    public func recentlyPlayed(offset: Int) async throws -> [RARecentGame] {
+        try decode([RARecentGame].self, try await request("API_GetUserRecentlyPlayedGames.php", ["u": credentials.username, "c": "50", "o": "\(offset)"]))
     }
 
     private func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
@@ -134,6 +140,8 @@ public final class CachedRA: RAProviding {
         cache.put("progress-\(gameId)", p, savedAt: now())
         return p
     }
+
+    public func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { try await client.recentlyPlayed(offset: offset) }
 
     public func cachedProgress(gameId: Int) -> (value: RAGameProgress, savedAt: Date)? {
         cache.get("progress-\(gameId)", as: RAGameProgress.self)

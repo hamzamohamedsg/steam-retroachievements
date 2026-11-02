@@ -6,6 +6,7 @@ struct FakeRA: RAProviding {
     var lists: [Int: [RAGameListEntry]]
     func gameList(consoleId: Int) async throws -> [RAGameListEntry] { lists[consoleId] ?? [] }
     func gameProgress(gameId: Int) async throws -> RAGameProgress { fatalError("unused") }
+    func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { [] }
 }
 
 struct FakeHasher: Fingerprinting {

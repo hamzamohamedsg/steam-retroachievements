@@ -75,18 +75,20 @@ public struct RAGameProgress: Codable, Equatable, Sendable {
     public var released: String?
     public var numDistinctPlayers: Int
     public var achievements: [RAAchievement]
+    /// Seconds the user has played; nil in progress cached before the app read it.
+    public var userTotalPlaytime: Int?
 
     public init(id: Int, title: String, consoleId: Int, consoleName: String, imageIcon: String, publisher: String?, developer: String?,
-                genre: String?, released: String?, numDistinctPlayers: Int, achievements: [RAAchievement]) {
+                genre: String?, released: String?, numDistinctPlayers: Int, achievements: [RAAchievement], userTotalPlaytime: Int? = nil) {
         self.id = id; self.title = title; self.consoleId = consoleId; self.consoleName = consoleName; self.imageIcon = imageIcon
         self.publisher = publisher; self.developer = developer; self.genre = genre; self.released = released
-        self.numDistinctPlayers = numDistinctPlayers; self.achievements = achievements
+        self.numDistinctPlayers = numDistinctPlayers; self.achievements = achievements; self.userTotalPlaytime = userTotalPlaytime
     }
 
     enum CodingKeys: String, CodingKey {
         case id = "ID", title = "Title", consoleId = "ConsoleID", consoleName = "ConsoleName", imageIcon = "ImageIcon"
         case publisher = "Publisher", developer = "Developer", genre = "Genre", released = "Released"
-        case numDistinctPlayers = "NumDistinctPlayers", achievements = "Achievements"
+        case numDistinctPlayers = "NumDistinctPlayers", achievements = "Achievements", userTotalPlaytime = "UserTotalPlaytime"
     }
 
     public init(from d: Decoder) throws {
@@ -101,6 +103,7 @@ public struct RAGameProgress: Codable, Equatable, Sendable {
         genre = try c.decodeIfPresent(String.self, forKey: .genre)
         released = try c.decodeIfPresent(String.self, forKey: .released)
         numDistinctPlayers = try c.decodeIfPresent(Int.self, forKey: .numDistinctPlayers) ?? 0
+        userTotalPlaytime = try c.decodeIfPresent(Int.self, forKey: .userTotalPlaytime)
         // RA sends achievements as an object keyed by ID, or as [] when the game has none;
         // our own cache stores them as an array.
         if let byID = try? c.decode([String: RAAchievement].self, forKey: .achievements) {
@@ -109,6 +112,17 @@ public struct RAGameProgress: Codable, Equatable, Sendable {
             achievements = try c.decodeIfPresent([RAAchievement].self, forKey: .achievements) ?? []
         }
     }
+}
+
+/// A game from the user's recently played list, which RA keeps for every game they've played, newest first.
+public struct RARecentGame: Codable, Equatable, Sendable {
+    public var gameId: Int
+    /// nil for games RA has no last-played time for.
+    public var lastPlayed: Date?
+
+    public init(gameId: Int, lastPlayed: Date?) { self.gameId = gameId; self.lastPlayed = lastPlayed }
+
+    enum CodingKeys: String, CodingKey { case gameId = "GameID", lastPlayed = "LastPlayed" }
 }
 
 enum RADate {
