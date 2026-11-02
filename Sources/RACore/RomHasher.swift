@@ -1,5 +1,6 @@
 import Foundation
 import rcheevos
+import CHDReader
 
 public enum Unreadable: Equatable, Sendable { case missing, blocked }
 public enum HashResult: Equatable, Sendable { case hash(String), unsupportedFormat, unreadable(Unreadable) }
@@ -16,7 +17,7 @@ public protocol Fingerprinting: Sendable {
 
 /// ROM fingerprints computed with RetroAchievements' own rcheevos library, the same code emulators use.
 public struct RomHasher: Fingerprinting {
-    static let unsupportedExtensions: Set<String> = ["chd", "7z"]
+    static let unsupportedExtensions: Set<String> = ["7z"]
     static let arcade = 27, msDos = 26
 
     public init() {}
@@ -93,6 +94,7 @@ public struct RomHasher: Fingerprinting {
             }
         }
         rc_hash_initialize_iterator(&it, romPath, nil, 0)
+        if URL(fileURLWithPath: romPath).pathExtension.lowercased() == "chd" { chd_cdreader_install(&it) }
         return body(&it)
     }
 

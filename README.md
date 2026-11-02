@@ -95,7 +95,7 @@ A shortcut with no ROM in its launch options just opens the emulator's menu, so 
 
 ## 🩺 When Something Looks Wrong
 
-- **"Couldn't check this ROM version":** the app can't fingerprint `.chd` or `.7z` files yet. It matched the game by name. Your emulator can still unlock achievements.
+- **"Couldn't check this ROM version":** the app can't fingerprint `.7z` files (or `.rvz`, or a `.chd` it can't read) yet. It matched the game by name. Your emulator can still unlock achievements.
 - **"RetroAchievements doesn't recognize this ROM version":** this exact ROM isn't one RetroAchievements supports, so the emulator won't unlock achievements for it.
 - **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one (in Big Picture, press A on it) to open that subset's achievements page. Subsets are separate from the game's own list and totals.
 - **Wrong game:** in the desktop library, click the (i) button next to the heart, then **Wrong game?**, and pick the right one. The app remembers your choice.

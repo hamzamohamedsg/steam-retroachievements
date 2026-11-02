@@ -40,8 +40,22 @@ import Testing
 }
 #endif
 
-@Test func chdIsUnsupported() throws {
+// The same PS1 disc made with chdman four ways. The hash is what rcheevos gives the cue/bin of that disc.
+@Test(arguments: ["ps1-cooked", "ps1-raw-audio", "ps1-pregap", "ps1-dvd"])
+func chdIsHashed(name: String) throws {
+    let url = try #require(Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: "chd"))
+    #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 12) == .hash("3077ba9f2d82bdd8ae39217b5af4c04e"))
+    #expect(RomHasher().allFingerprints(romPath: url.path) == [ConsoleHash(consoleId: 12, hash: "3077ba9f2d82bdd8ae39217b5af4c04e")])
+}
+
+@Test func corruptChdIsUnsupported() throws {
     let url = tempDir().appendingPathComponent("x.chd")
+    try Data(count: 1024).write(to: url)
+    #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 12) == .unsupportedFormat)
+}
+
+@Test func sevenZipIsUnsupported() throws {
+    let url = tempDir().appendingPathComponent("x.7z")
     try Data(count: 1024).write(to: url)
     #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 12) == .unsupportedFormat)
 }
