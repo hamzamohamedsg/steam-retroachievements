@@ -202,13 +202,25 @@ public struct Scanner: Sendable {
         return ShortcutSpec(name: item.title, exe: "\"/usr/bin/arch\"", launchOptions: "-arm64 /usr/bin/env DYLD_INSERT_LIBRARIES=\"\(overlay)\" \"\(exe)\" " + args, startDir: "\"\(dir)\"", bundle: bundle)
     }
 
-    /// `~/ROMs`, or EmuDeck's `~/Emulation/roms` when only that exists (it uses the same per-console folder names).
-    public static func defaultFolder() -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let roms = home.appendingPathComponent("ROMs"), emudeck = home.appendingPathComponent("Emulation/roms")
-        if !FileManager.default.fileExists(atPath: roms.path), FileManager.default.fileExists(atPath: emudeck.path) { return emudeck }
+    /// `~/ROMs`, or EmuDeck's ROM folder when only that exists (it uses the same per-console folder names): its `romsPath`
+    /// setting, which points at the SD card or another drive when EmuDeck was installed there, else `~/Emulation/roms`.
+    public static func defaultFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        let roms = home.appendingPathComponent("ROMs")
+        let settings = try? String(contentsOf: home.appendingPathComponent(".config/EmuDeck/settings.sh"), encoding: .utf8)
+        let emudeck = [settings.flatMap { emuDeckRomsPath(settings: $0, home: home.path) }, home.appendingPathComponent("Emulation/roms").path]
+            .compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0) }
+        if !FileManager.default.fileExists(atPath: roms.path), let emudeck { return URL(fileURLWithPath: emudeck) }
         try? FileManager.default.createDirectory(at: roms, withIntermediateDirectories: true)
         return roms
+    }
+
+    /// The last `romsPath=` line of EmuDeck's settings.sh, unquoted, with `~` and `$HOME` expanded.
+    static func emuDeckRomsPath(settings: String, home: String) -> String? {
+        guard let line = settings.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("romsPath=") }) else { return nil }
+        var value = line.dropFirst("romsPath=".count).trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t"))
+        if value.hasPrefix("~") { value = home + value.dropFirst() }
+        value = value.replacingOccurrences(of: "${HOME}", with: home).replacingOccurrences(of: "$HOME", with: home)
+        return value.isEmpty ? nil : value
     }
 
     private func item(_ path: String, _ title: String, _ console: Int, _ e: Emulator, _ core: String?, _ existing: Set<String>) -> ScanItem {

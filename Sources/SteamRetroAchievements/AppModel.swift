@@ -53,21 +53,32 @@ import SteamBridge
     }
 
     func launch() {
+        #if os(Linux)
+        RunningCopy.takeOver()
+        DesktopEntry.install()
+        // The login service starts this copy from now on, so an update unpacked somewhere else takes over at the next login too.
+        if LoginItem.isEnabled, (try? String(contentsOf: LoginItem.unitFile, encoding: .utf8))?.contains(AppPaths.executable) != true {
+            _ = setOpenAtLogin(true)
+        }
+        let freshMarker = !marker.exists()
+        #endif
         steam.onStateChange = { [weak self] state in
             guard let self else { return }
             steamState = state
             Log.info(statusText)
             #if os(Windows)
             Tray.status.withLock { $0 = statusText }
+            #elseif os(Linux)
+            // Only on first setup: a Steam that is slow to open its port at login isn't worth a notice.
+            if state == .needsRestart, freshMarker {
+                AppModel.notify("Restart Steam to finish setup", "Steam reads the setting Steam RetroAchievements needs only when it starts. On a Steam Deck, going back to Game Mode restarts it.")
+            }
             #endif
             // First run: put the sign-in dialog in front of the user as soon as Steam can show it.
             if state == .connected, credentials == nil { Task { await self.run("window.__sra.openSettings()") } }
         }
         steam.onError = { Log.error("steam: \($0)") }
         steam.start()  // also while signed out: the Steam panel then shows the sign-in prompt
-        #if os(Linux)
-        DesktopEntry.install()
-        #endif
         Log.info("launched")
         Task {
             guard let found = await UpdateChecker.newerRelease() else { return }
@@ -76,8 +87,7 @@ import SteamBridge
             #if os(Windows)
             Tray.update.withLock { $0 = found }
             #elseif os(Linux)
-            // No menu on Linux; a missing notify-send just means no notification.
-            runProcess("/usr/bin/env", ["notify-send", "Steam RetroAchievements \(found.version) is out", found.page.absoluteString])
+            AppModel.notify("Steam RetroAchievements \(found.version) is out", found.page.absoluteString)
             #endif
         }
     }
@@ -137,4 +147,14 @@ import SteamBridge
         runProcess("/usr/bin/env", ["xdg-open", url.absoluteString])
         #endif
     }
+
+    #if os(Linux)
+    /// A desktop notification (Linux has no menu or tray): notify-send, or where that isn't installed the notification
+    /// service over D-Bus with busctl, which comes with systemd (SteamOS, Bazzite). Nothing shows if neither works.
+    static func notify(_ title: String, _ body: String) {
+        guard runProcess("/usr/bin/env", ["notify-send", title, body]).status != 0 else { return }
+        runProcess("/usr/bin/env", ["busctl", "--user", "call", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                                    "org.freedesktop.Notifications", "Notify", "susssasa{sv}i", "Steam RetroAchievements", "0", "", title, body, "0", "0", "-1"])
+    }
+    #endif
 }

@@ -58,6 +58,23 @@ enum LoginItem {
     }
 }
 
+/// One copy at a time, the newest: a copy started by hand (an update, or from the app menu) replaces the one the login
+/// service started, so an old version never keeps answering Steam beside the new one.
+enum RunningCopy {
+    static var pidFile: URL { AppPaths.data.appendingPathComponent("steam-retroachievements.pid") }
+
+    static func takeOver() {
+        if let pid = (try? String(contentsOf: pidFile, encoding: .utf8)).flatMap({ Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
+           pid != getpid(),
+           // A pid can be reused: signal it only while it's still this program (comm is cut to 15 characters).
+           (try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8))?.hasPrefix("steam-retroach") == true {
+            kill(pid, SIGTERM)
+        }
+        try? FileManager.default.createDirectory(at: AppPaths.data, withIntermediateDirectories: true)
+        try? "\(getpid())".write(to: pidFile, atomically: true, encoding: .utf8)
+    }
+}
+
 /// An app-menu entry with the icon, pointing at wherever this copy of the program is (it's rewritten on every launch).
 enum DesktopEntry {
     static var file: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/applications/steam-retroachievements.desktop") }

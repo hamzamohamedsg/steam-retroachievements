@@ -94,6 +94,17 @@ func installed(cores: [String]) -> Installed {
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/mesen_libretro.so", romPath: "/r/nes/a.nes"))
 }
 
+@Test func defaultFolderFindsEmuDeckOnTheSDCard() {
+    let home = tempDir(), sd = tempDir().appendingPathComponent("Emulation/roms")
+    touch(home, ".config/EmuDeck/settings.sh")
+    try! "emulationPath=~/Emulation\nromsPath=~/Emulation/roms\nromsPath=\"\(sd.path)\"\n".write(to: home.appendingPathComponent(".config/EmuDeck/settings.sh"), atomically: true, encoding: .utf8)
+    #expect(Scanner.defaultFolder(home: home).path == home.appendingPathComponent("ROMs").path)  // the setting's folder doesn't exist yet
+    try! FileManager.default.removeItem(at: home.appendingPathComponent("ROMs"))
+    try! FileManager.default.createDirectory(at: sd, withIntermediateDirectories: true)
+    #expect(Scanner.defaultFolder(home: home).path == sd.path)
+    #expect(Scanner.emuDeckRomsPath(settings: "romsPath=$HOME/Emulation/roms", home: "/home/deck") == "/home/deck/Emulation/roms")
+}
+
 #if os(Windows)
 @Test func steamLibrariesComeFromLibraryFolders() throws {
     let steam = tempDir()

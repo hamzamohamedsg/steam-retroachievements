@@ -93,9 +93,11 @@ public struct EmulatorLaunch: Equatable, Sendable {
 
     /// nil when the shortcut doesn't launch a supported emulator. Words after the Target's path are arguments too:
     /// Steam ROM Manager's "append arguments to executable" (EmuDeck's default) puts them there and leaves Launch Options empty.
+    /// Launch Options with `%command%` get the Target in its place, so what comes before it is env vars and wrappers (gamemoderun, mangohud).
     public static func parse(exe: String, launchOptions: String, backslashEscapes: Bool = EmulatorLaunch.backslashEscapes) -> EmulatorLaunch? {
-        let target = tokenize(exe, backslashEscapes: backslashEscapes)
-        return parse(exePath: target.first ?? exe, args: target.dropFirst() + tokenize(launchOptions, backslashEscapes: backslashEscapes))
+        let target = tokenize(exe, backslashEscapes: backslashEscapes), options = tokenize(launchOptions, backslashEscapes: backslashEscapes)
+        let after = options.firstIndex(of: "%command%").map { options[($0 + 1)...] } ?? options[...]
+        return parse(exePath: target.first ?? exe, args: Array(target.dropFirst() + after))
     }
 
     static func parse(exePath: String, args: [String]) -> EmulatorLaunch? {

@@ -66,6 +66,16 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(Consoles.candidates(emulator: .retroarch, coreFile: nil, fingerprints: [ConsoleHash(consoleId: 6, hash: "h")]) == [6])
     #expect(Consoles.candidates(emulator: .dolphin, coreFile: nil, fingerprints: [ConsoleHash(consoleId: 19, hash: "h")]) == [19])
     #expect(Consoles.byID(12)?.name == "PlayStation")
+    // EmuDeck's (ES-DE's) folder names and the RetroArch cores its Steam ROM Manager parsers launch.
+    for (folder, id) in [("atarilynx", 13), ("tg-cd", 76), ("sneshd", 3), ("cps2", 27), ("sg-1000", 33), ("wonderswancolor", 53), ("genesiswide", 1), ("sgb", 4)] {
+        #expect(Consoles.forFolder(folder)?.id == id, "\(folder)")
+    }
+    #expect(Consoles.forCore(file: "bsnes_hd_beta_libretro.so").map(\.id) == [3])
+    #expect(Consoles.forCore(file: "vice_x64_libretro.so").map(\.id) == [30])
+    #expect(Consoles.candidates(emulator: .retroarch, coreFile: "genesis_plus_gx_wide_libretro.so", fingerprints: [ConsoleHash(consoleId: 1, hash: "h")]) == [1])
+    #expect(Consoles.candidates(emulator: .retroarch, coreFile: "mesen-s_libretro.so", fingerprints: [ConsoleHash(consoleId: 4, hash: "h")]) == [4])
+    #expect(Consoles.candidates(emulator: .retroarch, coreFile: "flycast_libretro.so", fingerprints: [ConsoleHash(consoleId: 27, hash: "h")]) == [27])
+    #expect(Consoles.candidates(emulator: .retroarch, coreFile: "flycast_libretro.so", fingerprints: [ConsoleHash(consoleId: 40, hash: "h")]) == [40])
 }
 
 @Test func parsesArchWrapper() {
@@ -92,6 +102,11 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(appended == EmulatorLaunch(emulator: .duckstation, coreFile: nil, romPath: "/r/psx/A (USA).chd"))
     let ra = EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/retroarch.sh\" -L /c/snes9x_libretro.so \"/r/snes/a.sfc\"", launchOptions: "")
     #expect(ra == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/snes9x_libretro.so", romPath: "/r/snes/a.sfc"))
+    // Steam puts the Target where %command% is: EmuDeck's Dolphin parser, and wrappers like gamemoderun or mangohud.
+    let dolphin = EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/dolphin-emu.sh\"", launchOptions: "vblank_mode=0 %command% -b -e \"/r/gc/a.rvz\"")
+    #expect(dolphin == EmulatorLaunch(emulator: .dolphin, coreFile: nil, romPath: "/r/gc/a.rvz"))
+    let wrapped = EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/duckstation.sh\" -batch \"/r/psx/a.chd\"", launchOptions: "gamemoderun mangohud %command%")
+    #expect(wrapped == EmulatorLaunch(emulator: .duckstation, coreFile: nil, romPath: "/r/psx/a.chd"))
 }
 
 @Test func parsesLinuxAndWindowsPaths() {
