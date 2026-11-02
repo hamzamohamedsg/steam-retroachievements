@@ -78,6 +78,8 @@ import SteamBridge
             if state == .connected, credentials == nil { Task { await self.run("window.__sra.openSettings()") } }
         }
         steam.onError = { Log.error("steam: \($0)") }
+        // The handler only hears about changes: show the starting state too, or a Steam that isn't open leaves the tray at "Starting".
+        steam.onStateChange?(steam.state)
         steam.start()  // also while signed out: the Steam panel then shows the sign-in prompt
         Log.info("launched")
         Task {

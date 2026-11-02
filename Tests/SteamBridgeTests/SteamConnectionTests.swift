@@ -32,3 +32,10 @@ import Testing
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 20) == .connecting)
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 31) == .needsRestart)
 }
+
+@Test func windowsCommandLineQuotesLikeCommandLineToArgvW() {
+    #expect(windowsCommandLine([#"C:\Windows\System32\tasklist.exe"#, "/FI", "IMAGENAME eq steam.exe", "/NH"])
+        == #"C:\Windows\System32\tasklist.exe /FI "IMAGENAME eq steam.exe" /NH"#)
+    // The Run key's value is the exe path in quotes; a folder ending in a backslash keeps it; an empty argument survives.
+    #expect(windowsCommandLine([#""C:\Program Files\SRA\a.exe""#, #"C:\My Games\"#, ""]) == #""\"C:\Program Files\SRA\a.exe\"" "C:\My Games\\" """#)
+}

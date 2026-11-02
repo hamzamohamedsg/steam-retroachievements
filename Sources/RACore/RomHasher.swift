@@ -1,6 +1,7 @@
 import Foundation
 import rcheevos
 import CHDReader
+import SteamBridge
 
 public enum Unreadable: Equatable, Sendable { case missing, blocked }
 public enum HashResult: Equatable, Sendable { case hash(String), unsupportedFormat, unreadable(Unreadable) }
@@ -118,15 +119,7 @@ public struct RomHasher: Fingerprinting {
     #endif
 
     private static func run(_ args: [String]) -> Data? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: unzipTool)
-        p.arguments = args
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return p.terminationStatus == 0 ? data : nil
+        let (status, data) = runProcessData(unzipTool, args)  // on Windows without a console window flashing up
+        return status == 0 ? data : nil
     }
 }

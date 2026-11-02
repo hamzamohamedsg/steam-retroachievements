@@ -22,7 +22,7 @@ let package = Package(
             cSettings: [.define("MINIZ_NO_ARCHIVE_APIS"), .define("MINIZ_NO_DEFLATE_APIS"), .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_TIME")]
         ),
         .target(name: "CHDReader", dependencies: ["rcheevos", "chdr"]),
-        .target(name: "RACore", dependencies: ["rcheevos", "CHDReader"]),
+        .target(name: "RACore", dependencies: ["rcheevos", "CHDReader", "SteamBridge"]),
         .testTarget(name: "RACoreTests", dependencies: ["RACore"], resources: [.copy("Fixtures")]),
         .target(name: "SteamBridge"),
         .executableTarget(name: "SteamRetroAchievements", dependencies: ["RACore", "SteamBridge"]),
