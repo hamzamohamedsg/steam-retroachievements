@@ -157,6 +157,8 @@
   .sra-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 0; }
   .sra-info dt { color: #8b929b; } .sra-info dd { margin: 0; color: #fff; }
   .sra-info .sra-notice { margin: 0; }
+  .sra-missing { padding: 10px 16px 0; } .sra-missing:empty { display: none; }
+  .sra-missing .sra-notice { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 6px; }
   .sra-info .sra-actions { margin: 0; }
   .sra-message { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
   .sra-close svg { width: 100%; height: 100%; }
@@ -702,6 +704,20 @@
   let pendingOpen = null;
   const desktopDoc = () => { const s = steamUI.surface(); return s && !s.bpm ? s.doc : null; };
   const head = (doc, text) => el(doc, "div", { class: "sra-head" }, text);
+  // Steam's own file picker, the one "Add a Non-Steam Game" uses; null when cancelled.
+  const canPick = () => typeof SteamClient.System?.OpenFileDialog === "function";
+  const pickPath = async (title, directory) => {
+    const options = { strTitle: title };
+    if (directory) options.bChooseDirectory = true;
+    else if (navigator.userAgent.includes("Windows")) options.rgFilters = [{ strFileTypeName: "Programs (*.exe)", rFilePatterns: ["*.exe"], bUseAsDefault: true }];
+    try { return (await SteamClient.System.OpenFileDialog(options)) || null; } catch (_) { return null; }
+  };
+  // For an emulator detection missed: the error to show, or null once it's saved (or the picker was cancelled: undefined).
+  const findEmulator = async (e) => {
+    const path = await pickPath(`Find ${e.name}`, false);
+    if (!path) return undefined;
+    return (await call("chooseEmulator", { emulator: e.id, path })).error ?? null;
+  };
   const signedInChanged = () => { syncPlaytimes(); if (current) { current.payload = null; load(current.appid, "getPanel"); } };
 
   const openSettings = safe(async () => {
@@ -736,8 +752,13 @@
         error, el(doc, "div", { class: "sra-actions" }, submit)));
         setTimeout(() => user.focus(), 0);
       }
-      kids.push(head(doc, "Emulators"), el(doc, "dl", { class: "sra-details" },
-        s.emulators.flatMap((e) => [el(doc, "dt", {}, e.name), el(doc, "dd", {}, e.installed ? "Installed" : "Not installed")])));
+      const emulatorError = el(doc, "div", { class: "sra-error" });
+      const find = (e) => el(doc, "button", { class: "sra-link", onclick: async () => {
+        const error = await findEmulator(e);
+        if (error === null) draw(); else if (error) emulatorError.textContent = error;
+      } }, "Find…");
+      kids.push(head(doc, "Emulators"), el(doc, "dl", { class: "sra-details" }, s.emulators.flatMap((e) => [el(doc, "dt", {}, e.name),
+        e.path ? el(doc, "dd", { title: e.path }, "Installed") : el(doc, "dd", {}, "Not found", canPick() ? [" · ", find(e)] : [])])), emulatorError);
       const login = el(doc, "input", { type: "checkbox", onchange: async () => { login.checked = await call("setOpenAtLogin", { on: login.checked }); } });
       login.checked = s.openAtLogin;
       kids.push(head(doc, "General"), el(doc, "label", { class: "sra-check" }, login, "Open at login"));
@@ -759,8 +780,24 @@
     if (!doc) { pendingOpen = openAddGames; return; }
     ensureStyle(doc);
     const consoles = await call("consoles");
-    const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false };
+    // `added`: shortcuts this dialog made, which Steam's list may not show with their launch options yet when the dialog rescans.
+    const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false, added: [] };
     const folder = el(doc, "input", { class: "sra-input", placeholder: "ROM folder", spellcheck: "false", onkeydown: (e) => { if (e.key === "Enter") scan(); } });
+    // The last folder scanned, so the dialog doesn't fall back to the empty default folder every time.
+    try { folder.value = localStorage.getItem("sra-rom-folder") ?? ""; } catch (_) {}
+    const browse = canPick() && el(doc, "button", { class: "sra-btn", onclick: async () => {
+      const path = await pickPath("Choose the folder your ROMs are in", true);
+      if (path) { folder.value = path; scan(); }
+    } }, "Browse…");
+    const missing = el(doc, "div", { class: "sra-missing" });
+    const drawMissing = (emulators) => missing.replaceChildren(...emulators.map((e) => {
+      const error = el(doc, "div", { class: "sra-error" });
+      return el(doc, "div", { class: "sra-notice" }, el(doc, "div", {}, `${e.name} wasn't found, so its games can't be added yet.`, error),
+        canPick() && el(doc, "button", { class: "sra-btn", onclick: async () => {
+          const r = await findEmulator(e);
+          if (r === null) scan(); else if (r) error.textContent = r;
+        } }, `Find ${e.name}…`));
+    }));
     const list = el(doc, "div", { class: "sra-dialog-body" });
     const footer = el(doc, "div", { class: "sra-footer" });
     const chosen = () => st.items.filter((i) => i.status === "ready" && st.included.has(i.id));
@@ -790,13 +827,15 @@
       st.busy = true;
       drawFooter("Scanning…");
       try {
-        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: await listShortcuts(),
+        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: [...await listShortcuts(), ...st.added],
           consoleOverrides: st.consoleOverrides, emulatorOverrides: st.emulatorOverrides }, 180000);
         folder.value = r.folder;
+        try { localStorage.setItem("sra-rom-folder", r.folder); } catch (_) {}
         st.items = r.items;
         st.included = new Set(r.items.filter((i) => i.status === "ready").map((i) => i.id));
+        drawMissing(r.missingEmulators);
         drawList();
-        if (!message && !r.items.length) message = "No games found in this folder.";
+        if (!message && !r.items.length) message = "No games found in this folder. Choose the folder your ROMs are in, with one subfolder per console (psx, ps2, psp, snes, …).";
       } finally {
         st.busy = false;
         drawFooter(message);
@@ -807,10 +846,11 @@
       st.busy = true;
       drawFooter("Adding…");
       const results = await addShortcuts(items.map((i) => i.shortcut));
+      st.added.push(...items.filter((_, n) => !results[n].error).map((i) => i.shortcut));
       const errors = results.filter((r) => r.error).map((r) => `${r.name}: ${r.error}`);
       await scan([`Added ${results.length - errors.length} games to Steam.`, ...errors].join("\n"));
     });
-    overlay(doc, "Add Games", el(doc, "div", { class: "sra-search" }, folder, el(doc, "button", { class: "sra-btn", onclick: () => scan() }, "Scan")), list, footer);
+    overlay(doc, "Add Games", el(doc, "div", { class: "sra-search" }, folder, browse, el(doc, "button", { class: "sra-btn", onclick: () => scan() }, "Scan")), missing, list, footer);
     scan();
   });
 

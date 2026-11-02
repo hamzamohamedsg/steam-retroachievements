@@ -45,10 +45,13 @@ public final class BridgeHandler: BridgeHandling {
     let push: @Sendable (String) async -> Void
     let installed: @Sendable () -> Installed
     let hasher: any Fingerprinting
+    let chosenEmulators: ChosenEmulators?
 
+    /// `installed` defaults to detecting emulators, the ones picked in Settings (`chosenEmulators`) first.
     public init(services: @escaping @Sendable () async -> Services?, actions: BridgeActions, push: @escaping @Sendable (String) async -> Void,
-                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher()) {
-        self.services = services; self.actions = actions; self.push = push; self.installed = installed; self.hasher = hasher
+                chosenEmulators: ChosenEmulators? = nil, installed: (@Sendable () -> Installed)? = nil, hasher: any Fingerprinting = RomHasher()) {
+        self.services = services; self.actions = actions; self.push = push; self.hasher = hasher; self.chosenEmulators = chosenEmulators
+        self.installed = installed ?? { .detect(chosen: chosenEmulators?.load() ?? [:]) }
     }
 
     struct ShortcutParams: Decodable { var shortcut: ShortcutInfo }
@@ -59,9 +62,11 @@ public final class BridgeHandler: BridgeHandling {
     struct SearchResult: Encodable { var gameId: Int; var title, consoleName, iconURL: String; var numAchievements: Int }
     struct ConsoleResult: Encodable { var id: Int; var name: String }
     struct SignInParams: Decodable { var username, apiKey: String }
-    struct SignInResult: Encodable { var error: String? }
+    struct ErrorResult: Encodable { var error: String? }
     struct ToggleParams: Decodable { var on: Bool }
-    struct EmulatorStatus: Encodable { var name: String; var installed: Bool }
+    struct ChooseEmulatorParams: Decodable { var emulator: Emulator; var path: String }
+    /// `path` is the program the app starts it with; nil when none was found.
+    struct EmulatorStatus: Encodable { var id, name: String; var path: String? }
     struct SettingsResult: Encodable { var username: String?; var openAtLogin: Bool; var emulators: [EmulatorStatus] }
     struct ShortcutLine: Decodable { var exe, launchOptions: String }
     /// Override keys are a folder path and a console id (as text: JSON object keys).
@@ -73,7 +78,8 @@ public final class BridgeHandler: BridgeHandling {
         var emulatorChoices: [Choice]
         var shortcut: ShortcutSpec?
     }
-    struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
+    /// `missingEmulators`: ones some of the games need that weren't found, so the dialog can offer to find them.
+    struct ScanResult: Encodable { var folder: String; var missingEmulators: [Choice]; var items: [ScanRow] }
     struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
     /// Steam's own units: whole minutes, and a Unix time.
     struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks: Int }
@@ -106,11 +112,16 @@ public final class BridgeHandler: BridgeHandling {
         case "settings":
             let (username, openAtLogin) = await actions.account()
             let found = installed().emulators
-            return try encode(SettingsResult(username: username, openAtLogin: openAtLogin,
-                                             emulators: Emulator.allCases.map { EmulatorStatus(name: $0.displayName, installed: found[$0] != nil) }))
+            return try encode(SettingsResult(username: username, openAtLogin: openAtLogin, emulators: Emulator.allCases.map {
+                EmulatorStatus(id: $0.rawValue, name: $0.displayName, path: found[$0].map { $0.args.isEmpty ? $0.exe : "\($0.exe) \($0.args)" })
+            }))
+        case "chooseEmulator":
+            let p = try d.decode(ChooseEmulatorParams.self, from: params)
+            guard let chosenEmulators else { return try encode(ErrorResult(error: "Choosing emulators isn't available.")) }
+            return try encode(ErrorResult(error: chosenEmulators.choose(p.emulator, path: p.path)))
         case "signIn":
             let p = try d.decode(SignInParams.self, from: params)
-            return try encode(SignInResult(error: await actions.signIn(p.username, p.apiKey)))
+            return try encode(ErrorResult(error: await actions.signIn(p.username, p.apiKey)))
         case "signOut":
             await actions.signOut()
             return Data("null".utf8)
@@ -144,7 +155,14 @@ public final class BridgeHandler: BridgeHandling {
         let emulatorOverrides = Dictionary(p.emulatorOverrides.compactMap { k, v in Int(k).map { ($0, v) } }) { a, _ in a }
         let items = Scanner(installed: installed, hasher: hasher)
             .scan(folder: folder, existingRomPaths: existing, consoleOverrides: p.consoleOverrides, emulatorOverrides: emulatorOverrides)
-        return ScanResult(folder: folder.path, items: items.map { item in
+        // A game with no emulator waits on its console's first choice; RetroArch present but missing a core needs a download, not this.
+        var missing: [Emulator] = []
+        for item in items {
+            guard case .noEmulator = item.status, let e = item.consoleId.flatMap({ EmulatorPreference.order(for: $0).first }),
+                  installed.emulators[e] == nil, !missing.contains(e) else { continue }
+            missing.append(e)
+        }
+        return ScanResult(folder: folder.path, missingEmulators: missing.map { Choice(id: $0.rawValue, name: $0.displayName) }, items: items.map { item in
             let (status, text): (String, String) = switch item.status {
             case .ready: ("ready", "Ready")
             case .alreadyInSteam: ("alreadyInSteam", "Already in Steam")

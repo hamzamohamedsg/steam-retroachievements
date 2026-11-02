@@ -27,9 +27,9 @@ public enum Emulator: String, Codable, CaseIterable, Sendable {
     public var binaryNames: [String] {
         switch self {
         case .retroarch: ["retroarch"]
-        case .duckstation: ["duckstation-qt", "duckstation-qt-x64-ReleaseLTCG"]
-        case .pcsx2: ["pcsx2-qt", "pcsx2-qtx64"]
-        case .ppsspp: ["PPSSPPSDL", "PPSSPPWindows64"]
+        case .duckstation: ["duckstation-qt", "duckstation-qt-x64-ReleaseLTCG", "duckstation-qt-ARM64-ReleaseLTCG", "duckstation-qt-x64-ReleaseLTCG-SSE2"]
+        case .pcsx2: ["pcsx2-qt", "pcsx2-qtx64", "pcsx2-qtx64-avx2"]
+        case .ppsspp: ["PPSSPPSDL", "PPSSPPWindows64", "PPSSPPWindowsARM64", "PPSSPPWindows"]
         case .dolphin: ["dolphin-emu", "Dolphin"]
         case .flycast: ["flycast"]
         case .skyemu: ["SkyEmu"]

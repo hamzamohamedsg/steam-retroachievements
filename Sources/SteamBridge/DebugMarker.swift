@@ -11,9 +11,7 @@ public struct DebugMarker: Sendable {
         #if os(macOS)
         return home.appendingPathComponent("Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS")
         #elseif os(Windows)
-        let reg = runProcess("C:\\Windows\\System32\\reg.exe", ["query", "HKCU\\Software\\Valve\\Steam", "/v", "SteamPath"]).output
-        let path = reg.components(separatedBy: "REG_SZ").dropFirst().first?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return URL(fileURLWithPath: path.flatMap { $0.isEmpty ? nil : $0 } ?? "C:\\Program Files (x86)\\Steam")
+        return URL(fileURLWithPath: Registry.steamPath ?? "C:\\Program Files (x86)\\Steam")
         #else
         // ~/.steam/steam links to the native install; the Flatpak keeps its own.
         let candidates = [".steam/steam", ".local/share/Steam", ".var/app/com.valvesoftware.Steam/.local/share/Steam"].map(home.appendingPathComponent)

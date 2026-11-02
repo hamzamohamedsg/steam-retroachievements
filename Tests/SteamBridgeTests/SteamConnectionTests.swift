@@ -41,3 +41,14 @@ import Testing
     // The Run key's value is the exe path in quotes; a folder ending in a backslash keeps it; an empty argument survives.
     #expect(windowsCommandLine([#""C:\Program Files\SRA\a.exe""#, #"C:\My Games\"#, ""]) == #""\"C:\Program Files\SRA\a.exe\"" "C:\My Games\\" """#)
 }
+
+#if os(Windows)
+@Test func readsTheRegistry() {
+    let key = #"Software\Microsoft\Windows NT\CurrentVersion"#
+    #expect(Registry.string(.localMachine, key, "ProductName")?.isEmpty == false)
+    #expect(Registry.string(.localMachine, key, "no such value") == nil)
+    #expect(Registry.valueNames(.localMachine, key).contains("ProductName"))
+    #expect(Registry.subkeys(.localMachine, #"Software\Microsoft"#).contains("Windows"))
+    #expect(Registry.subkeys(.currentUser, #"Software\no such key"#).isEmpty)
+}
+#endif

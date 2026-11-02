@@ -127,4 +127,64 @@ func installed(cores: [String]) -> Installed {
     #expect(Installed.windowsInstallDirs(for: .pcsx2, env: emudeck, steamLibraries: []).contains(root + "PCSX2-Qt"))
     #expect(Installed.windowsInstallDirs(for: .ppsspp, env: emudeck, steamLibraries: []).contains(root + "PPSSPP"))
 }
+
+@Test func readsWindowsInstallRecords() {
+    #expect(Installed.folder(ofIcon: #""C:\Program Files\PCSX2\pcsx2-qt.exe",0"#) == #"C:\Program Files\PCSX2"#)
+    #expect(Installed.folder(ofIcon: #"C:\Users\u\AppData\Local\Programs\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe"#) == #"C:\Users\u\AppData\Local\Programs\DuckStation"#)
+    #expect(Installed.emulator(installedAs: "DuckStation") == .duckstation)
+    #expect(Installed.emulator(installedAs: "Dolphin Emulator") == .dolphin)
+    #expect(Installed.emulator(installedAs: "PCSX2 - Nightly") == .pcsx2)
+    #expect(Installed.emulator(installedAs: "RetroArchiver") == nil)
+    #expect(Installed.exePath(inRecord: #"C:\Emu\PPSSPP\PPSSPPWindows64.exe.FriendlyAppName"#) == #"C:\Emu\PPSSPP\PPSSPPWindows64.exe"#)
+    #expect(Installed.exePath(inRecord: #"C:\RetroArch-Win64\retroarch.exe"#) == #"C:\RetroArch-Win64\retroarch.exe"#)
+    #expect(Installed.exePath(inRecord: #"C:\WINDOWS\system32\explorerframe.dll.FriendlyAppName"#) == nil)
+    #expect(Installed.exePath(inRecord: "LangID") == nil)
+    #expect(Installed.programName(#"C:\Emu\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe"#) == "duckstation-qt-x64-releaseltcg")
+}
 #endif
+
+/// A runnable file with this name: a copy of a real program on Windows, where only real programs count as executable.
+func fakeProgram(named name: String) -> String {
+    let dir = tempDir()
+    #if os(Windows)
+    let url = dir.appendingPathComponent(name + ".exe")
+    try! FileManager.default.copyItem(atPath: #"C:\Windows\System32\where.exe"#, toPath: url.path)
+    #else
+    let url = dir.appendingPathComponent(name)
+    try! Data("#!/bin/sh\n".utf8).write(to: url)
+    try! FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    #endif
+    return url.path
+}
+
+@Test func chosenEmulatorIsCheckedAndUsed() {
+    let store = ChosenEmulators(file: tempDir().appendingPathComponent("emulators.json"))
+    let exe = fakeProgram(named: "duckstation-qt")
+    #expect(store.choose(.ppsspp, path: exe) == "That isn't PPSSPP. Choose the program you start PPSSPP with.")
+    #expect(store.choose(.duckstation, path: "\"\(exe)\"") == nil)  // Windows' "Copy as path" adds quotes
+    #expect(store.load() == [.duckstation: exe])
+    #expect(Installed.detect(chosen: store.load()).emulators[.duckstation]?.exe == exe)
+}
+
+@Test func chooseEmulatorThroughTheBridge() async throws {
+    let store = ChosenEmulators(file: tempDir().appendingPathComponent("emulators.json"))
+    let handler = BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, chosenEmulators: store)
+    let exe = fakeProgram(named: "PPSSPPSDL")
+    let params = try JSONSerialization.data(withJSONObject: ["emulator": "ppsspp", "path": exe])
+    #expect(String(decoding: try await handler.handle(method: "chooseEmulator", params: params), as: UTF8.self) == "{}")
+    let settings = try JSONSerialization.jsonObject(with: try await handler.handle(method: "settings", params: Data("{}".utf8))) as? [String: Any]
+    let ppsspp = (settings?["emulators"] as? [[String: Any]])?.first { $0["id"] as? String == "ppsspp" }
+    #expect(ppsspp?["path"] as? String == exe)
+}
+
+@Test func scanNamesMissingEmulators() async throws {
+    let root = tempDir()
+    touch(root, "psx/game.cue")
+    touch(root, "snes/game.sfc")
+    let inst = Installed(emulators: [.retroarch: Launcher(exe: "/A/RetroArch")], coresDirectory: tempDir())
+    let handler = BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, installed: { inst }, hasher: PathHasher(byFile: [:]))
+    let params = #"{"folder":"\#(root.path.replacingOccurrences(of: "\\", with: "\\\\"))","consoleOverrides":{},"emulatorOverrides":{},"shortcuts":[]}"#
+    let result = try JSONSerialization.jsonObject(with: try await handler.handle(method: "scanGames", params: Data(params.utf8))) as? [String: Any]
+    // PS1 wants DuckStation; the SNES game only lacks a RetroArch core, which is a download in RetroArch, not something to find.
+    #expect((result?["missingEmulators"] as? [[String: Any]])?.map { $0["id"] as? String } == ["duckstation"])
+}

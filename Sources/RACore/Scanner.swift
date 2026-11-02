@@ -1,4 +1,7 @@
 import Foundation
+#if os(Windows)
+import SteamBridge
+#endif
 
 public enum ScanStatus: Equatable, Sendable { case ready, alreadyInSteam, noEmulator(String), chooseConsole }
 
@@ -40,22 +43,26 @@ public struct Installed: Sendable {
     public static let coreExtension = "so"
     #endif
 
-    public static func detect() -> Installed {
+    /// `chosen` holds the programs the user picked in Settings; they win over anything found here.
+    public static func detect(chosen: [Emulator: String] = [:]) -> Installed {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var found: [Emulator: Launcher] = [:]
+        for (e, exe) in chosen where FileManager.default.isExecutableFile(atPath: exe) { found[e] = Launcher(exe: exe) }
         #if os(macOS)
-        for e in Emulator.allCases {
+        for e in Emulator.allCases where found[e] == nil {
             if let exe = e.installedApp().flatMap({ Bundle(url: $0)?.executableURL?.path }) { found[e] = Launcher(exe: exe) }
         }
         let cores = home.appendingPathComponent("Library/Application Support/RetroArch/cores")
         #else
         let env = ProcessInfo.processInfo.environment
         #if os(Windows)
-        // shortcut: only PATH and default install folders are searched; portable emulators elsewhere need to be on PATH
         let pathDirs = (env["Path"] ?? env["PATH"] ?? "").split(separator: ";").map(String.init)
-        let libraries = steamLibraries(steamFolder: (env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)") + "\\Steam")
-        let extraDirs = { (e: Emulator) in windowsInstallDirs(for: e, env: env, steamLibraries: libraries) }
+        let steam = Registry.steamPath?.replacingOccurrences(of: "/", with: "\\") ?? (env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)") + "\\Steam"
+        let libraries = steamLibraries(steamFolder: steam), listed = installedProgramFolders()
+        let extraDirs = { (e: Emulator) in windowsInstallDirs(for: e, env: env, steamLibraries: libraries) + (listed[e] ?? []) }
         let file = { (dir: String, name: String) in dir + "\\" + name + ".exe" }
+        // Emulators that come as a zip (DuckStation, PPSSPP) run from wherever it was unpacked; Windows remembers the programs it started.
+        let ran = programsRun()
         let appImages = [String]()
         #else
         let pathDirs = (env["PATH"] ?? "/usr/bin").split(separator: ":").map(String.init)
@@ -65,10 +72,13 @@ public struct Installed: Sendable {
         let apps = home.path + "/Applications"
         let appImages = ((try? FileManager.default.contentsOfDirectory(atPath: apps)) ?? []).sorted()
             .map { apps + "/" + $0 }.filter { $0.lowercased().hasSuffix(".appimage") && FileManager.default.isExecutableFile(atPath: $0) }
+        let ran = [String]()
         #endif
-        for e in Emulator.allCases {
+        for e in Emulator.allCases where found[e] == nil {
+            let names = Set(e.binaryNames.map { $0.lowercased() })
             let exe = (extraDirs(e) + pathDirs).lazy.flatMap { dir in e.binaryNames.lazy.map { file(dir, $0) } }
                 .first { FileManager.default.isExecutableFile(atPath: $0) }
+                ?? ran.first { names.contains(programName($0)) && FileManager.default.isExecutableFile(atPath: $0) }
             if let exe = exe ?? appImages.first(where: { EmulatorLaunch.match($0) == e }) {
                 found[e] = Launcher(exe: exe)
             } else if let id = e.flatpakID, ["/var/lib/flatpak/app/\(id)", home.path + "/.local/share/flatpak/app/\(id)"].contains(where: FileManager.default.fileExists) {
@@ -115,7 +125,60 @@ public struct Installed: Sendable {
         if let profile = env["USERPROFILE"] { dirs += names.map { profile + "\\scoop\\apps\\" + $0.lowercased() + "\\current" } }
         return dirs
     }
+
+    /// Folders from Windows' list of installed programs (Settings → Apps), for emulators installed somewhere other than the default.
+    static func installedProgramFolders() -> [Emulator: [String]] {
+        let list = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+        var folders: [Emulator: [String]] = [:]
+        for (hive, key) in [(Registry.Hive.currentUser, list), (.localMachine, list), (.localMachine, "Software\\WOW6432Node\\" + list.dropFirst("Software\\".count))] {
+            for sub in Registry.subkeys(hive, key) {
+                let entry = key + "\\" + sub
+                guard let e = Registry.string(hive, entry, "DisplayName").flatMap(emulator(installedAs:)) else { continue }
+                folders[e, default: []] += [Registry.string(hive, entry, "InstallLocation"), Registry.string(hive, entry, "DisplayIcon").flatMap(folder(ofIcon:))]
+                    .compactMap { $0 }.filter { !$0.isEmpty }
+            }
+        }
+        return folders
+    }
+
+    /// "DuckStation", "Dolphin Emulator" or "PCSX2 - Nightly" names that emulator; "RetroArchiver" doesn't.
+    static func emulator(installedAs displayName: String) -> Emulator? {
+        let name = displayName.lowercased()
+        return Emulator.allCases.first { e in
+            let prefix = e.displayName.lowercased()
+            return name.hasPrefix(prefix) && name.dropFirst(prefix.count).first.map { !$0.isLetter && !$0.isNumber } ?? true
+        }
+    }
+
+    /// The folder of an installed program's icon, `"C:\Emu\x.exe",0` → `C:\Emu`.
+    static func folder(ofIcon icon: String) -> String? {
+        var path = Substring(icon)
+        if let comma = path.lastIndex(of: ","), path[path.index(after: comma)...].allSatisfy({ $0.isNumber || $0 == "-" }) { path = path[..<comma] }
+        path = path.trimmingCharacters(in: CharacterSet(charactersIn: "\" "))[...]
+        return path.lastIndex(of: "\\").map { String(path[..<$0]) }
+    }
+
+    /// Programs this user has started, from two lists Windows keeps: the shell's MuiCache (`C:\Emu\x.exe.FriendlyAppName`)
+    /// and the Program Compatibility Assistant's (the paths themselves).
+    static func programsRun() -> [String] {
+        let mui = Registry.valueNames(.currentUser, "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache")
+        let pca = Registry.valueNames(.currentUser, "Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Store")
+        return (mui + pca).compactMap(exePath(inRecord:))
+    }
+
+    /// `C:\Emu\x.exe.FriendlyAppName` → `C:\Emu\x.exe`; nil when the entry isn't a program file.
+    static func exePath(inRecord name: String) -> String? {
+        guard let r = name.range(of: ".exe", options: [.caseInsensitive, .backwards]),
+              name[r.upperBound...].isEmpty || name[r.upperBound...].hasPrefix(".") else { return nil }
+        return String(name[..<r.upperBound])
+    }
     #endif
+
+    /// A program's file name as `binaryNames` lists it: lowercased, without `.exe`.
+    static func programName(_ path: String) -> String {
+        let name = (path.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent.lowercased()
+        return name.hasSuffix(".exe") ? String(name.dropLast(4)) : name
+    }
 
     /// The first installed core RetroArch has for a console, as a full path.
     func core(for console: Console) -> String? {
