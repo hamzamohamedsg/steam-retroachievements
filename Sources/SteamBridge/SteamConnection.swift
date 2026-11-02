@@ -83,10 +83,11 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     }
 
     /// Steam reads the marker only at launch, so a Steam started before the marker (or one that never opens the port) needs a restart.
+    /// A port that answers wins: the process check can miss Steam (it reads tasklist's output on Windows), and must not block connecting.
     public nonisolated static func decide(steamRunning: Bool, steamLaunched: Date?, markerCreated: Date?, portAnswered: Bool, now: Date) -> SteamState {
+        if portAnswered { return .connecting }
         guard steamRunning else { return .steamNotRunning }
         if let launched = steamLaunched, let created = markerCreated, launched < created { return .needsRestart }
-        if portAnswered { return .connecting }
         if let launched = steamLaunched, now.timeIntervalSince(launched) >= 20 { return .needsRestart }
         return .connecting
     }

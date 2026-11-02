@@ -99,16 +99,18 @@ public struct Installed: Sendable {
         return libraries
     }
 
-    /// Where Windows emulators usually live besides PATH: default installers, Steam's RetroArch, Scoop, and unzipped-in-place builds.
+    /// Where Windows emulators usually live besides PATH: default installers, Steam's RetroArch, EmuDeck, Scoop, and unzipped-in-place builds.
     static func windowsInstallDirs(for e: Emulator, env: [String: String], steamLibraries: [String]) -> [String] {
         var names = [e.displayName]
         if e == .dolphin { names += ["Dolphin-x64", "Dolphin Emulator"] }
+        if e == .pcsx2 { names.append("PCSX2-Qt") }  // EmuDeck's folder
         var dirs: [String] = []
         if e == .retroarch {
             dirs.append("C:\\RetroArch-Win64")
             dirs += steamLibraries.map { $0 + "\\steamapps\\common\\RetroArch" }
         }
-        let roots = [env["ProgramFiles"], env["ProgramFiles(x86)"], env["LOCALAPPDATA"].map { $0 + "\\Programs" }].compactMap { $0 }
+        let roots = [env["ProgramFiles"], env["ProgramFiles(x86)"], env["LOCALAPPDATA"].map { $0 + "\\Programs" },
+                     env["APPDATA"].map { $0 + "\\emudeck\\Emulators" }].compactMap { $0 }
         dirs += roots.flatMap { root in names.map { root + "\\" + $0 } }
         if let profile = env["USERPROFILE"] { dirs += names.map { profile + "\\scoop\\apps\\" + $0.lowercased() + "\\current" } }
         return dirs

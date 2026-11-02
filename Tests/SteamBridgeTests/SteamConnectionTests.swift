@@ -31,6 +31,8 @@ import Testing
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: true, now: t0 + 11) == .connecting)
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 20) == .connecting)
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 31) == .needsRestart)
+    // Steam's port answering proves it's open with the switch on, even if the process check missed it (Windows' tasklist).
+    #expect(SteamConnection.decide(steamRunning: false, steamLaunched: nil, markerCreated: t0, portAnswered: true, now: t0) == .connecting)
 }
 
 @Test func windowsCommandLineQuotesLikeCommandLineToArgvW() {

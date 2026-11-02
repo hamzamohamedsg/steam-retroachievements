@@ -28,7 +28,7 @@ public enum Emulator: String, Codable, CaseIterable, Sendable {
         switch self {
         case .retroarch: ["retroarch"]
         case .duckstation: ["duckstation-qt", "duckstation-qt-x64-ReleaseLTCG"]
-        case .pcsx2: ["pcsx2-qt"]
+        case .pcsx2: ["pcsx2-qt", "pcsx2-qtx64"]
         case .ppsspp: ["PPSSPPSDL", "PPSSPPWindows64"]
         case .dolphin: ["dolphin-emu", "Dolphin"]
         case .flycast: ["flycast"]
@@ -112,6 +112,17 @@ public struct EmulatorLaunch: Equatable, Sendable {
             guard let i = args.firstIndex(where: { !$0.hasPrefix("-") && !$0.contains("=") }) else { return nil }
             return parse(exePath: args[i], args: Array(args[(i + 1)...]))
         }
+        // EmuDeck for Windows: `cmd /k start … powershell … -Command "& {<launcher>.ps1 '<arg>' '<rom>'}" …`. The launcher passes
+        // its arguments on to the emulator, like the Linux .sh ones; PowerShell quotes them in single quotes, never with backslashes.
+        if ["cmd", "cmd.exe", "powershell.exe", "pwsh.exe"].contains(exePath.split { $0 == "/" || $0 == "\\" }.last?.lowercased() ?? "") {
+            guard let i = args.firstIndex(where: { $0.lowercased() == "-command" }), i + 1 < args.count else { return nil }
+            var script = args[i + 1].trimmingCharacters(in: .whitespaces)
+            if script.hasPrefix("&") { script = script.dropFirst().trimmingCharacters(in: .whitespaces) }
+            if script.hasPrefix("{"), script.hasSuffix("}") { script = String(script.dropFirst().dropLast()) }
+            let words = tokenize(script, backslashEscapes: false)
+            guard let launcher = words.first else { return nil }
+            return parse(exePath: launcher, args: Array(words.dropFirst()))
+        }
         // `flatpak run [options] <app id> …`
         if (exePath as NSString).lastPathComponent == "flatpak" {
             guard let r = args.firstIndex(of: "run"), let i = args[(r + 1)...].firstIndex(where: { !$0.hasPrefix("-") }) else { return nil }
@@ -152,7 +163,7 @@ public struct EmulatorLaunch: Equatable, Sendable {
         return EmulatorLaunch(emulator: emulator, coreFile: core, romPath: rom)
     }
 
-    /// An exe, `open -a` or Flatpak id names emulator E if it ends in `/<name>`, `/<name>.app`, `/<name>.exe` or `/<name>.sh`
+    /// An exe, `open -a` or Flatpak id names emulator E if it ends in `/<name>`, `/<name>.app`, `/<name>.exe`, or `/<name>.sh` or `.ps1`
     /// (EmuDeck's launchers, which pass their arguments on to the emulator), or contains `<name>.app/`;
     /// an AppImage names E if its file name starts with `<name>`.
     static func match(_ path: String) -> Emulator? {
@@ -162,7 +173,7 @@ public struct EmulatorLaunch: Equatable, Sendable {
             let file = (p as NSString).lastPathComponent
             return Emulator.allCases.first { names($0).contains { file.hasPrefix($0) } }
         }
-        if p.hasSuffix(".exe") { p.removeLast(4) } else if p.hasSuffix(".sh") { p.removeLast(3) }
+        if p.hasSuffix(".exe") || p.hasSuffix(".ps1") { p.removeLast(4) } else if p.hasSuffix(".sh") { p.removeLast(3) }
         return Emulator.allCases.first { e in
             names(e).contains { app in
                 p == app || p.hasSuffix("/\(app)") || p.hasSuffix("/\(app).app") || p.contains("\(app).app/") || p == "\(app).app"

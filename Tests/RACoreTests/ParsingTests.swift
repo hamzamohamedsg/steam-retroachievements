@@ -117,6 +117,21 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(Consoles.forCore(file: "/c/mgba_libretro.so").map(\.id) == [4, 5, 6])
 }
 
+@Test func parsesEmuDeckForWindowsShortcuts() {
+    // EmuDeck for Windows: the Target is cmd.exe running PowerShell running EmuDeck's launcher, with everything appended.
+    let wrap = { (script: String) in #""C:\Windows\System32\cmd.exe" /k start /min "Loading PowerShell Launcher" "C:\Windows\System32\WindowsPowershell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "& {"# + script + #"}" && exit " && exit --emudeck"# }
+    let duck = EmulatorLaunch.parse(exe: wrap(#"D:\Emulation\tools\launchers\duckstation.ps1 '-fullscreen' 'D:\Emulation\roms\psx\Crash Bandicoot (USA).chd'"#), launchOptions: "", backslashEscapes: false)
+    #expect(duck == EmulatorLaunch(emulator: .duckstation, coreFile: nil, romPath: #"D:\Emulation\roms\psx\Crash Bandicoot (USA).chd"#))
+    let ra = EmulatorLaunch.parse(exe: wrap(#"C:\Emulation\tools\launchers\retroarch.ps1 -L 'cores\mgba_libretro.dll' 'C:\Emulation\roms\gba\a.gba'"#), launchOptions: "", backslashEscapes: false)
+    #expect(ra == EmulatorLaunch(emulator: .retroarch, coreFile: #"cores\mgba_libretro.dll"#, romPath: #"C:\Emulation\roms\gba\a.gba"#))
+    #expect(Consoles.forCore(file: ra?.coreFile ?? "").map(\.id) == [4, 5, 6])
+    #expect(EmulatorLaunch.parse(exe: wrap(#"C:\Emulation\tools\launchers\pcsx2.ps1 'C:\Emulation\roms\ps2\a.iso'"#), launchOptions: "", backslashEscapes: false)?.emulator == .pcsx2)
+    #expect(EmulatorLaunch.parse(exe: wrap(#"C:\Emulation\tools\launchers\rpcs3.ps1 'C:\a.iso'"#), launchOptions: "", backslashEscapes: false) == nil)
+    #expect(EmulatorLaunch.parse(exe: #""C:\Windows\System32\cmd.exe""#, launchOptions: "/c dir", backslashEscapes: false) == nil)
+    // EmuDeck's own PCSX2 is pcsx2-qtx64.exe.
+    #expect(EmulatorLaunch.parse(exe: #""C:\Users\u\AppData\Roaming\emudeck\Emulators\PCSX2-Qt\pcsx2-qtx64.exe""#, launchOptions: #""C:\r\a.iso""#, backslashEscapes: false)?.emulator == .pcsx2)
+}
+
 #if os(Windows)
 @Test func matchStoreTreatsWindowsPathsAsOne() throws {
     let file = tempDir().appendingPathComponent("matches.json")

@@ -121,5 +121,10 @@ func installed(cores: [String]) -> Installed {
     #expect(ra.contains("D:\\SteamLibrary\\steamapps\\common\\RetroArch") && ra.contains("C:\\RetroArch-Win64") && ra.contains("C:\\Program Files (x86)\\RetroArch"))
     let dolphin = Installed.windowsInstallDirs(for: .dolphin, env: env, steamLibraries: [])
     #expect(dolphin.contains("C:\\Program Files\\Dolphin-x64") && dolphin.contains("C:\\Users\\u\\scoop\\apps\\dolphin\\current"))
+    // EmuDeck for Windows keeps its emulators in %APPDATA%\emudeck\Emulators.
+    let emudeck = env.merging(["APPDATA": "C:\\Users\\u\\AppData\\Roaming"]) { $1 }, root = "C:\\Users\\u\\AppData\\Roaming\\emudeck\\Emulators\\"
+    #expect(Installed.windowsInstallDirs(for: .duckstation, env: emudeck, steamLibraries: []).contains(root + "DuckStation"))
+    #expect(Installed.windowsInstallDirs(for: .pcsx2, env: emudeck, steamLibraries: []).contains(root + "PCSX2-Qt"))
+    #expect(Installed.windowsInstallDirs(for: .ppsspp, env: emudeck, steamLibraries: []).contains(root + "PPSSPP"))
 }
 #endif
