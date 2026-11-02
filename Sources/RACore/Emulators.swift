@@ -143,15 +143,24 @@ public struct EmulatorLaunch: Equatable, Sendable {
             }
             i += 1
         }
+        // Older EmuDeck parsers quote the ROM as "'/path'"; its launchers strip the inner quotes too.
+        if let r = rom, r.count > 1, r.hasPrefix("'"), r.hasSuffix("'") { rom = String(r.dropFirst().dropLast()) }
         return EmulatorLaunch(emulator: emulator, coreFile: core, romPath: rom)
     }
 
-    /// An exe, `open -a` or Flatpak id names emulator E if it ends in `/<name>`, `/<name>.app` or `/<name>.exe`, or contains `<name>.app/`.
+    /// An exe, `open -a` or Flatpak id names emulator E if it ends in `/<name>`, `/<name>.app`, `/<name>.exe` or `/<name>.sh`
+    /// (EmuDeck's launchers, which pass their arguments on to the emulator), or contains `<name>.app/`;
+    /// an AppImage names E if its file name starts with `<name>`.
     static func match(_ path: String) -> Emulator? {
         var p = path.lowercased().replacingOccurrences(of: "\\", with: "/")
-        if p.hasSuffix(".exe") { p.removeLast(4) }
+        let names = { (e: Emulator) in (e.appNames + e.binaryNames + [e.flatpakID].compactMap { $0 }).map { $0.lowercased() } }
+        if p.hasSuffix(".appimage") {
+            let file = (p as NSString).lastPathComponent
+            return Emulator.allCases.first { names($0).contains { file.hasPrefix($0) } }
+        }
+        if p.hasSuffix(".exe") { p.removeLast(4) } else if p.hasSuffix(".sh") { p.removeLast(3) }
         return Emulator.allCases.first { e in
-            (e.appNames + e.binaryNames + [e.flatpakID].compactMap { $0 }).map { $0.lowercased() }.contains { app in
+            names(e).contains { app in
                 p == app || p.hasSuffix("/\(app)") || p.hasSuffix("/\(app).app") || p.contains("\(app).app/") || p == "\(app).app"
             }
         }

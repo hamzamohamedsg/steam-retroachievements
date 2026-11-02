@@ -56,16 +56,20 @@ public struct Installed: Sendable {
         let libraries = steamLibraries(steamFolder: (env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)") + "\\Steam")
         let extraDirs = { (e: Emulator) in windowsInstallDirs(for: e, env: env, steamLibraries: libraries) }
         let file = { (dir: String, name: String) in dir + "\\" + name + ".exe" }
+        let appImages = [String]()
         #else
-        // shortcut: AppImages aren't found unless they're on PATH under the emulator's binary name
         let pathDirs = (env["PATH"] ?? "/usr/bin").split(separator: ":").map(String.init)
         let extraDirs = { (_: Emulator) in [String]() }
         let file = { (dir: String, name: String) in dir + "/" + name }
+        // shortcut: AppImages are only looked for in ~/Applications (where EmuDeck puts them) and on PATH under the binary name
+        let apps = home.path + "/Applications"
+        let appImages = ((try? FileManager.default.contentsOfDirectory(atPath: apps)) ?? []).sorted()
+            .map { apps + "/" + $0 }.filter { $0.lowercased().hasSuffix(".appimage") && FileManager.default.isExecutableFile(atPath: $0) }
         #endif
         for e in Emulator.allCases {
             let exe = (extraDirs(e) + pathDirs).lazy.flatMap { dir in e.binaryNames.lazy.map { file(dir, $0) } }
                 .first { FileManager.default.isExecutableFile(atPath: $0) }
-            if let exe {
+            if let exe = exe ?? appImages.first(where: { EmulatorLaunch.match($0) == e }) {
                 found[e] = Launcher(exe: exe)
             } else if let id = e.flatpakID, ["/var/lib/flatpak/app/\(id)", home.path + "/.local/share/flatpak/app/\(id)"].contains(where: FileManager.default.fileExists) {
                 found[e] = Launcher(exe: "/usr/bin/flatpak", args: "run \(id)")

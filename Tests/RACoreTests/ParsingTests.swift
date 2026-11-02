@@ -80,6 +80,15 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
     #expect(EmulatorLaunch.parse(exe: "/usr/bin/flatpak", launchOptions: "run org.mozilla.firefox") == nil)
 }
 
+@Test func parsesEmuDeckLaunchersAndAppImages() {
+    let l = EmulatorLaunch.parse(exe: "\"/run/media/mmcblk0p1/Emulation/tools/launchers/pcsx2-qt.sh\"", launchOptions: "-batch -fullscreen -nogui \"/r/ps2/a.chd\"")
+    #expect(l == EmulatorLaunch(emulator: .pcsx2, coreFile: nil, romPath: "/r/ps2/a.chd"))
+    // Older EmuDeck parsers wrapped the ROM in single quotes inside double quotes.
+    #expect(EmulatorLaunch.parse(exe: "\"/home/deck/Emulation/tools/launchers/duckstation.sh\"", launchOptions: "-batch \"'/r/psx/a.chd'\"")?.romPath == "/r/psx/a.chd")
+    #expect(EmulatorLaunch.parse(exe: "/home/deck/Applications/pcsx2-v2.2.0-linux-appimage-x64-Qt.AppImage", launchOptions: "\"/r/a.iso\"")?.emulator == .pcsx2)
+    #expect(EmulatorLaunch.parse(exe: "/home/deck/Emulation/tools/launchers/rpcs3.sh", launchOptions: "\"/r/a.iso\"") == nil)
+}
+
 @Test func parsesLinuxAndWindowsPaths() {
     #expect(EmulatorLaunch.parse(exe: "\"/usr/bin/dolphin-emu\"", launchOptions: "-b -e \"/r/gc/a.iso\"")?.emulator == .dolphin)
     let w = EmulatorLaunch.parse(exe: #""C:\RetroArch-Win64\retroarch.exe""#, launchOptions: #"-L "C:\RetroArch-Win64\cores\snes9x_libretro.dll" "C:\ROMs\snes\a.sfc""#, backslashEscapes: false)

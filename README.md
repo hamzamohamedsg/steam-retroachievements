@@ -73,9 +73,9 @@ Keep your ROMs in the `ROMs` folder in your home folder (`~/ROMs`), or EmuDeck's
 You can add games any of these ways:
 
 - **Add Games dialog:** click the **Add Games** button next to Steam's own "Add a Game" (or **Add Games…** in the macOS menu bar). It scans a folder, using one subfolder per console (`snes`, `psx`, `gba`, …), picks an installed emulator for each game, and adds the games to Steam in one go.
-  - On Linux it finds emulators on your `PATH` (`retroarch`, `duckstation-qt`, `pcsx2-qt`, `PPSSPPSDL`, `dolphin-emu`, `flycast`, `SkyEmu`) and Flathub installs. It doesn't find AppImages unless they're on your `PATH` under those names.
+  - On Linux it finds emulators on your `PATH` (`retroarch`, `duckstation-qt`, `pcsx2-qt`, `PPSSPPSDL`, `dolphin-emu`, `flycast`, `SkyEmu`), Flathub installs, and AppImages in `~/Applications` (where EmuDeck puts them).
   - On Windows it looks on your `PATH`, in `C:\RetroArch-Win64`, and in `Program Files` / `AppData\Local\Programs\<emulator>`.
-- **Steam ROM Manager:** shortcuts it creates work as they are, as long as they launch the emulator directly rather than through a wrapper script. On macOS, with Steam ROM Manager closed, `scripts/srm-parsers.py` sets it up with one parser per console, reading the same `~/ROMs/<console>` folders and pulling artwork from SteamGridDB. Re-run it after downloading new RetroArch cores.
+- **Steam ROM Manager:** shortcuts it creates work as they are, as long as they launch the emulator directly or through EmuDeck's launchers (`retroarch.sh`, `duckstation.sh`, `pcsx2-qt.sh`, …); other wrapper scripts aren't recognized. On macOS, with Steam ROM Manager closed, `scripts/srm-parsers.py` sets it up with one parser per console, reading the same `~/ROMs/<console>` folders and pulling artwork from SteamGridDB. Re-run it after downloading new RetroArch cores.
 - **Steam's "Add a Non-Steam Game" (macOS):** pick the emulator app, then open the shortcut's **Properties**:
   - Set **Target** to `"/usr/bin/arch"`. Steam on macOS starts games as Intel apps, which can't load Apple Silicon cores; `arch -arm64` keeps the emulator native.
   - Set **Launch Options** to `-arm64 "<emulator executable>"` followed by the emulator's arguments:
