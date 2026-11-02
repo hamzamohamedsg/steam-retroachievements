@@ -104,6 +104,22 @@ let bonusEntry = RAGameListEntry(id: 900, title: "Super Mario Bros. [Subset - Bo
     #expect(try await matcher(.hash("zzz"), lists: [7: [early, smbEntry]]).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .unrecognizedHash))
 }
 
+@Test func hashListedOnlyOnSubsetMatchesBaseGame() async throws {
+    var base = smbEntry; base.hashes = []
+    var bonus = bonusEntry; bonus.hashes = ["abc"]
+    let store = MatchStore(file: tempDir().appendingPathComponent("m.json"))
+    #expect(try await matcher(.hash("abc"), lists: [7: [bonus, base]], store: store).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .verified))
+    #expect(store.record(romPath: "/r/nes/Super Mario Bros. (World).nes")?.gameId == 1446)
+}
+
+@Test func oldSubsetMatchMovesToBaseGame() async throws {
+    let rom = "/r/nes/Super Mario Bros. (World).nes"
+    let store = MatchStore(file: tempDir().appendingPathComponent("m.json"))
+    store.save(romPath: rom, MatchRecord(gameId: 900, consoleId: 7, manual: false, hash: "abc", size: 0, modified: 0))
+    #expect(try await matcher(.hash("abc"), lists: [7: [bonusEntry, smbEntry]], store: store).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .verified))
+    #expect(store.record(romPath: rom)?.gameId == 1446)
+}
+
 @Test func listsSubsetsOfTheGame() async throws {
     let other = RAGameListEntry(id: 901, title: "Other Game [Subset - Bonus]", consoleId: 7, consoleName: "", imageIcon: "", numAchievements: 3, hashes: [])
     let m = matcher(.hash("abc"), lists: [7: [smbEntry, bonusEntry, other]])

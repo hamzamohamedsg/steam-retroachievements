@@ -36,7 +36,12 @@ public actor Matcher {
         guard let rom = launch.romPath else { return .noRom }
         let state = romState(rom, launch)
 
-        if let record = store.record(romPath: rom) {
+        if var record = store.record(romPath: rom) {
+            // Older versions auto-matched some ROMs to a subset; move those to the base game, which shows the subsets anyway.
+            if !record.manual, let id = try await baseId(record.gameId, consoleId: record.consoleId), id != record.gameId {
+                record.gameId = id
+                store.save(romPath: rom, record)
+            }
             if record.hash != state.hash || record.size != state.size || record.modified != state.modified {
                 var updated = record
                 updated.hash = state.hash; updated.size = state.size; updated.modified = state.modified
@@ -48,9 +53,10 @@ public actor Matcher {
 
         if let hash = state.hash {
             for console in state.consoles {
-                if let entry = try await ra.gameList(consoleId: console).first(where: { $0.hashes.contains(hash) }) {
-                    save(rom, entry.id, console, manual: false, state)
-                    return .matched(gameId: entry.id, consoleId: console, verification: .verified)
+                if let entry = try await ra.gameList(consoleId: console).first(where: { $0.hashes.contains(hash) }),
+                   let id = try await baseId(entry.id, consoleId: console) {
+                    save(rom, id, console, manual: false, state)
+                    return .matched(gameId: id, consoleId: console, verification: .verified)
                 }
             }
         }
@@ -113,8 +119,19 @@ public actor Matcher {
 
     private func verification(_ state: RomState, gameId: Int, consoleId: Int) async throws -> Verification {
         guard let hash = state.hash else { return state.base }
-        let hashes = try await ra.gameList(consoleId: consoleId).first { $0.id == gameId }?.hashes ?? []
+        // A ROM listed only on one of the game's subsets is still the right ROM for the game.
+        let ids = Set([gameId] + (try await subsets(gameId: gameId, consoleId: consoleId)).map(\.id))
+        let hashes = try await ra.gameList(consoleId: consoleId).filter { ids.contains($0.id) }.flatMap(\.hashes)
         return hashes.contains(hash) ? .verified : .unrecognizedHash
+    }
+
+    /// The base game for a subset (same title without the `[Subset - ...]` tag), or the id itself; nil if not in the list.
+    private func baseId(_ gameId: Int, consoleId: Int) async throws -> Int? {
+        let list = try await ra.gameList(consoleId: consoleId)
+        guard let entry = list.first(where: { $0.id == gameId }) else { return nil }
+        guard Titles.subsetName(entry.title) != nil else { return gameId }
+        let key = Titles.key(entry.title)
+        return list.first { Titles.subsetName($0.title) == nil && Titles.key($0.title) == key }?.id ?? gameId
     }
 
     private func save(_ rom: String, _ gameId: Int, _ consoleId: Int, manual: Bool, _ state: RomState) {
