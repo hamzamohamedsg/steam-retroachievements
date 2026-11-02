@@ -193,7 +193,9 @@ public struct Scanner: Sendable {
                                 startDir: "\"\(dir)\"", bundle: exe)
         }
         let bundle = exe.range(of: ".app/").map { String(exe[..<$0.lowerBound]) + ".app" } ?? exe
-        return ShortcutSpec(name: item.title, exe: "\"/usr/bin/arch\"", launchOptions: "-arm64 \"\(exe)\" " + args, startDir: "\"\(dir)\"", bundle: bundle)
+        // arch is SIP-protected and strips DYLD_INSERT_LIBRARIES, which carries Steam's overlay; `env` puts it back for the emulator.
+        let overlay = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/gameoverlayrenderer.dylib").path
+        return ShortcutSpec(name: item.title, exe: "\"/usr/bin/arch\"", launchOptions: "-arm64 /usr/bin/env DYLD_INSERT_LIBRARIES=\"\(overlay)\" \"\(exe)\" " + args, startDir: "\"\(dir)\"", bundle: bundle)
     }
 
     /// `~/ROMs`, or EmuDeck's `~/Emulation/roms` when only that exists (it uses the same per-console folder names).

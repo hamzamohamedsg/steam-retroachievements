@@ -811,15 +811,21 @@
   const load = safe(async (appid, method) => {
     const shortcut = await steamUI.shortcut(appid);
     if (current?.appid !== appid) return;
+    // Steam's details didn't arrive in time: try the page again on the next tick rather than calling it "not an emulator".
+    if (!shortcut.exe) { lastAppid = null; return; }
     current.shortcut = shortcut;
+    // The first match of a disc image can take a while (hashing, game lists): say so after 20 s, but keep waiting for the reply.
+    const slow = setTimeout(safe(() => {
+      if (current?.appid === appid && !current.payload) render({ state: "error", message: "Couldn't reach RetroAchievements.", achievements: [] });
+    }), 20000);
     let payload;
     try {
-      payload = await call(method, { shortcut });
+      payload = await call(method, { shortcut }, 180000);
     } catch (e) {
       log("error", e?.message ?? e);
-      // No reply in time and nothing on screen yet: say so instead of showing nothing.
-      if (current?.appid === appid && !current.payload) render({ state: "error", message: "Couldn't reach RetroAchievements.", achievements: [] });
       return;
+    } finally {
+      clearTimeout(slow);
     }
     if (current?.appid === appid) render(payload);   // drop replies for a page we've left
   });
@@ -831,7 +837,8 @@
     const doc = surface.doc;
     if (!surface.bpm) ensureLibraryButtons(doc);
     const appid = steamUI.appid(surface);
-    if (appid !== lastAppid || doc !== lastDoc) {
+    // A shortcut's overview can load after its page opens (Steam just started, or the game was just added).
+    if (appid !== lastAppid || doc !== lastDoc || (!current && appid && steamUI.isShortcut(appid))) {
       lastDoc?.querySelectorAll?.("[data-sra-panel]").forEach((n) => n.remove());
       lastDoc = doc;
       lastAppid = appid;
@@ -839,8 +846,9 @@
       closeOverlay?.();
       current = appid && steamUI.isShortcut(appid) ? { appid, bpm: surface.bpm, shortcut: null, payload: null } : null;
       if (current) load(appid, "getPanel");
-    } else if (current?.payload && current.payload.state !== "hidden" && (current.nodes?.some((n) => !n.isConnected) || (current.bpm && current.tab !== bpmTab(doc)))) {
-      render(current.payload);   // Steam re-rendered the page and dropped our node, or Big Picture switched tabs
+    } else if (current?.payload && current.payload.state !== "hidden" && (current.nodes?.some((n) => !n.isConnected) || (current.bpm ? current.tab !== bpmTab(doc) : !current.nodes?.length))) {
+      // Steam re-rendered the page and dropped our node, Big Picture switched tabs, or the reply came before the page had drawn
+      render(current.payload);
     }
     if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }
   });

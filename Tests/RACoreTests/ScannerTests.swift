@@ -76,7 +76,9 @@ func installed(cores: [String]) -> Installed {
     let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: true)
     // Steam on macOS launches games as x86_64; arch -arm64 keeps emulators native so arm64 cores load.
     #expect(s.exe == "\"/usr/bin/arch\"")
-    #expect(s.launchOptions == "-arm64 \"/A/RetroArch\" -L \"\(inst.coresDirectory.path)/snes9x_libretro.dylib\" \"/r/snes/Super Mario World (USA).sfc\"")
+    #expect(s.launchOptions.hasPrefix("-arm64 /usr/bin/env DYLD_INSERT_LIBRARIES=\""))
+    #expect(s.launchOptions.hasSuffix("gameoverlayrenderer.dylib\" \"/A/RetroArch\" -L \"\(inst.coresDirectory.path)/snes9x_libretro.dylib\" \"/r/snes/Super Mario World (USA).sfc\""))
+    #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions)?.romPath == "/r/snes/Super Mario World (USA).sfc")
     #expect(s.bundle == "/A/RetroArch")
     #expect(s.name == "Super Mario World")
 }

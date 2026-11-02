@@ -103,6 +103,11 @@ public struct EmulatorLaunch: Equatable, Sendable {
             guard let i = args.firstIndex(where: { !$0.hasPrefix("-") }) else { return nil }
             return parse(exePath: args[i], args: Array(args[(i + 1)...]))
         }
+        // `env VAR=value … <emulator> …`
+        if (exePath as NSString).lastPathComponent == "env" {
+            guard let i = args.firstIndex(where: { !$0.hasPrefix("-") && !$0.contains("=") }) else { return nil }
+            return parse(exePath: args[i], args: Array(args[(i + 1)...]))
+        }
         // `flatpak run [options] <app id> …`
         if (exePath as NSString).lastPathComponent == "flatpak" {
             guard let r = args.firstIndex(of: "run"), let i = args[(r + 1)...].firstIndex(where: { !$0.hasPrefix("-") }) else { return nil }
