@@ -191,7 +191,17 @@ public struct Scanner: Sendable {
     public static func shortcut(for item: ScanItem, installed: Installed, wrapInArch: Bool = Scanner.wrapsInArch) -> ShortcutSpec {
         let emulator = item.emulator ?? .retroarch
         let launcher = installed.emulators[emulator] ?? Launcher(exe: "")
-        let exe = launcher.exe, args = emulator.launchOptions(rom: item.romPath, coreFile: item.coreFile)
+        let exe = launcher.exe
+        // Foundation URLs may use forward slashes on Windows. PCSX2 expects a native
+        // Windows path when Steam passes the ROM as a command-line argument.
+        #if os(Windows)
+        let rom = item.romPath.replacingOccurrences(of: "/", with: "\\")
+        let core = item.coreFile?.replacingOccurrences(of: "/", with: "\\")
+        #else
+        let rom = item.romPath
+        let core = item.coreFile
+        #endif
+        let args = emulator.launchOptions(rom: rom, coreFile: core)
         let sep = exe.lastIndex { $0 == "/" || $0 == "\\" }
         let dir = sep.map { String(exe[...$0]) } ?? ""
         guard wrapInArch else {
@@ -244,9 +254,28 @@ public struct Scanner: Sendable {
 
     /// ROM files under `folder`. A folder with an .m3u lists only playlists; one with .cue/.gdi skips its track files.
     private func roms(in folder: URL) -> [URL] {
-        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey],
-                                                         options: [.skipsHiddenFiles]) else { return [] }
-        let files = walker.compactMap { $0 as? URL }.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+        // Avoid per-file URL metadata queries, which can crash in Foundation.dll on
+        // Windows while enumerating PS2 CHDs. Walk names and distinguish directories
+        // without reading the ROM contents.
+        let manager = FileManager.default
+        var files: [URL] = []
+        var pending = [folder]
+        var visited = Set<String>()
+        while let dir = pending.popLast() {
+            let key = dir.resolvingSymlinksInPath().standardizedFileURL.path
+            guard visited.insert(key).inserted,
+                  let names = try? manager.contentsOfDirectory(atPath: dir.path) else { continue }
+            for name in names where !name.hasPrefix(".") {
+                let child = dir.appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                guard manager.fileExists(atPath: child.path, isDirectory: &isDirectory) else { continue }
+                if isDirectory.boolValue {
+                    pending.append(child)
+                } else {
+                    files.append(child)
+                }
+            }
+        }
         let byFolder = Dictionary(grouping: files) { $0.deletingLastPathComponent().path }
         return byFolder.values.flatMap { group -> [URL] in
             let exts = Set(group.map { $0.pathExtension.lowercased() })

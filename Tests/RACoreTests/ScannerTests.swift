@@ -106,6 +106,15 @@ func installed(cores: [String]) -> Installed {
 }
 
 #if os(Windows)
+@Test func ps2ShortcutUsesNativeWindowsRomPath() {
+    let inst = Installed(emulators: [.pcsx2: Launcher(exe: #"C:\Program Files\PCSX2\pcsx2-qt.exe"#)], coresDirectory: tempDir())
+    let item = ScanItem(romPath: "D:/ROMs/ps2/Silent Hill 2 (USA).chd", title: "Silent Hill 2", consoleId: 21,
+                        emulator: .pcsx2, coreFile: nil, status: .ready)
+    let shortcut = Scanner.shortcut(for: item, installed: inst)
+    #expect(shortcut.launchOptions == #"-batch -- "D:\ROMs\ps2\Silent Hill 2 (USA).chd""#)
+    #expect(EmulatorLaunch.parse(exe: shortcut.exe, launchOptions: shortcut.launchOptions)?.romPath == #"D:\ROMs\ps2\Silent Hill 2 (USA).chd"#)
+}
+
 @Test func steamLibrariesComeFromLibraryFolders() throws {
     let steam = tempDir()
     try FileManager.default.createDirectory(at: steam.appendingPathComponent("steamapps"), withIntermediateDirectories: true)
@@ -128,3 +137,32 @@ func installed(cores: [String]) -> Installed {
     #expect(Installed.windowsInstallDirs(for: .ppsspp, env: emudeck, steamLibraries: []).contains(root + "PPSSPP"))
 }
 #endif
+
+// A recognised PS2 folder with a CHD must not invoke the hasher or read its data.
+@Test func scansPS2CHDFromFolderWithoutHashing() {
+    let root = tempDir()
+    touch(root, "ps2/Silent Hill 2.chd")
+    let inst = Installed(emulators: [.pcsx2: Launcher(exe: "/portable/PCSX2/pcsx2-qt.exe")], coresDirectory: tempDir())
+    let items = Scanner(installed: inst, hasher: PathHasher(byFile: [:]))
+        .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:])
+    #expect(items.count == 1)
+    #expect(items.first?.consoleId == 21)
+    #expect(items.first?.emulator == .pcsx2)
+    #expect(items.first?.status == .ready)
+}
+
+@Test func scansLargeSparsePS2CHD() throws {
+    let root = tempDir()
+    let rom = root.appendingPathComponent("ps2/The Getaway.chd")
+    try FileManager.default.createDirectory(at: rom.deletingLastPathComponent(), withIntermediateDirectories: true)
+    #expect(FileManager.default.createFile(atPath: rom.path, contents: nil))
+    let handle = try FileHandle(forWritingTo: rom)
+    try handle.truncate(atOffset: 5_000_000_000)
+    try handle.close()
+    let inst = Installed(emulators: [.pcsx2: Launcher(exe: "/portable/PCSX2/pcsx2-qt.exe")], coresDirectory: tempDir())
+    let items = Scanner(installed: inst, hasher: PathHasher(byFile: [:]))
+        .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:])
+    #expect(items.count == 1)
+    #expect(items.first?.romPath == rom.path)
+    #expect(items.first?.consoleId == 21)
+}
