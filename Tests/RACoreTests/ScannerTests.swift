@@ -77,10 +77,21 @@ func installed(cores: [String]) -> Installed {
     // Steam on macOS launches games as x86_64; arch -arm64 keeps emulators native so arm64 cores load.
     #expect(s.exe == "\"/usr/bin/arch\"")
     #expect(s.launchOptions.hasPrefix("-arm64 /usr/bin/env DYLD_INSERT_LIBRARIES=\""))
-    #expect(s.launchOptions.hasSuffix("gameoverlayrenderer.dylib\" \"/A/RetroArch\" -L \"\(inst.coresDirectory.path)/snes9x_libretro.dylib\" \"/r/snes/Super Mario World (USA).sfc\""))
+    #if os(Windows)
+    let expectedCore = Scanner.windowsCommandLinePath(item.coreFile!)
+    #else
+    let expectedCore = item.coreFile!
+    #endif
+    #expect(s.launchOptions.hasSuffix("gameoverlayrenderer.dylib\" \"/A/RetroArch\" -L \"\(expectedCore)\" \"/r/snes/Super Mario World (USA).sfc\""))
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions)?.romPath == "/r/snes/Super Mario World (USA).sfc")
     #expect(s.bundle == "/A/RetroArch")
     #expect(s.name == "Super Mario World")
+}
+
+@Test func windowsPathConversionPreservesUnixPaths() {
+    #expect(Scanner.windowsCommandLinePath("D:/ROMs/ps2/Silent Hill 2 (USA).chd") == #"D:\ROMs\ps2\Silent Hill 2 (USA).chd"#)
+    #expect(Scanner.windowsCommandLinePath("/r/snes/Super Mario World (USA).sfc") == "/r/snes/Super Mario World (USA).sfc")
+    #expect(Scanner.windowsCommandLinePath("//server/roms/The Getaway.chd") == #"\\server\roms\The Getaway.chd"#)
 }
 
 @Test func shortcutWithoutArch() {

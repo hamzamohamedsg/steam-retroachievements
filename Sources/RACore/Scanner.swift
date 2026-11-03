@@ -187,16 +187,27 @@ public struct Scanner: Sendable {
     public static let wrapsInArch = false
     #endif
 
+    /// Normalize genuine Windows paths in Steam launch arguments, while preserving
+    /// POSIX paths (including paths used by the existing cross-platform tests).
+    static func windowsCommandLinePath(_ path: String) -> String {
+        let bytes = Array(path.utf8)
+        let hasDrivePrefix = bytes.count >= 2 &&
+            ((bytes[0] >= 65 && bytes[0] <= 90) || (bytes[0] >= 97 && bytes[0] <= 122)) &&
+            bytes[1] == 58
+        guard hasDrivePrefix || path.hasPrefix("//") else { return path }
+        return path.replacingOccurrences(of: "/", with: "\\")
+    }
+
     /// Steam on macOS launches games as x86_64, which can't load arm64 cores, so there the emulator runs through `arch -arm64`.
     public static func shortcut(for item: ScanItem, installed: Installed, wrapInArch: Bool = Scanner.wrapsInArch) -> ShortcutSpec {
         let emulator = item.emulator ?? .retroarch
         let launcher = installed.emulators[emulator] ?? Launcher(exe: "")
         let exe = launcher.exe
-        // Foundation URLs may use forward slashes on Windows. PCSX2 expects a native
-        // Windows path when Steam passes the ROM as a command-line argument.
+        // Windows drive/UNC paths may contain forward slashes from Foundation URLs.
+        // Avoid changing POSIX-style paths used elsewhere or in test fixtures.
         #if os(Windows)
-        let rom = item.romPath.replacingOccurrences(of: "/", with: "\\")
-        let core = item.coreFile?.replacingOccurrences(of: "/", with: "\\")
+        let rom = windowsCommandLinePath(item.romPath)
+        let core = item.coreFile.map(windowsCommandLinePath)
         #else
         let rom = item.romPath
         let core = item.coreFile
