@@ -205,6 +205,9 @@
   // RetroAchievements counts hardcore and softcore unlocks apart: each unlock says which, and hardcore icons get RA's gold frame.
   const mode = (r) => r?.unlocked && r.hardcore !== undefined ? (r.hardcore ? "Hardcore" : "Softcore") : null;
   const hc = (r) => r?.unlocked && r.hardcore ? " sra-hc" : "";
+  const achievementURL = (r) => `https://retroachievements.org/achievement/${r.id}`;
+  // Big Picture (and the Deck's Game Mode) gets Steam's own browser: a desktop browser opened by the app wouldn't show there.
+  const openRA = safe((url) => current?.bpm ? SteamClient.URL.ExecuteSteamURL(`steam://openurl/${url}`) : call("openURL", { url }));
 
   const showCard = (doc, target, row) => {
     hideCard();
@@ -232,7 +235,7 @@
   // a node under the nearest registered ancestor, then the element. A failure just leaves the items mouse/touch-only.
   let navCleanups = [];
   const FLOW_COLUMN = 1, FLOW_ROW = 2;  // Steam's layout enum: NONE, COLUMN, ROW, ...
-  const BTN = { OK: 1, CANCEL: 2, BUMPER_LEFT: 5, BUMPER_RIGHT: 6, DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 };  // Steam's gamepad buttons
+  const BTN = { OK: 1, CANCEL: 2, SECONDARY: 3, BUMPER_LEFT: 5, BUMPER_RIGHT: 6, DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 };  // Steam's gamepad buttons
   const handled = (e) => { e.stopPropagation(); e.preventDefault(); };  // how Steam's own handlers claim a button
   // Each .sra-carousel is a row (left/right) and each .sra-column a column (up/down) of .sra-item; returns the items' nodes in order.
   const registerNav = (doc, root, cleanups = navCleanups, actions = { [BTN.OK]: "View My Achievements" }) => {
@@ -254,7 +257,10 @@
         return [...group.querySelectorAll(".sra-item")].map((item) => {
           // Steam delivers its gamepad buttons to the element as DOM events (what Focusable's onOKButton listens for).
           item.addEventListener("vgp_onok", (e) => { handled(e); item.click(); });
-          return (item.sraNode = add(groupNode, item, { focusable: true, actionDescriptionMap: actions }));
+          // X (□ on PlayStation) opens the item's RetroAchievements page, when it has one.
+          if (item.sraURL) item.addEventListener("vgp_onbuttondown", (e) => { if (e.detail?.button === BTN.SECONDARY) { handled(e); openRA(item.sraURL); } });
+          return (item.sraNode = add(groupNode, item, { focusable: true,
+            actionDescriptionMap: item.sraURL ? { ...actions, [BTN.SECONDARY]: "View on RetroAchievements" } : actions }));
         });
       });
     } catch (e) { log("error", `controller focus unavailable: ${e?.message ?? e}`); return []; }
@@ -278,8 +284,8 @@
       el(doc, "div", { class: c(D, "AppDetailsSectionContainer", ...containerKeys) + " Panel" }, ...content));
   };
 
-  const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel",
-      onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard },
+  const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel sra-stat",
+      onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard, onclick: () => openRA(achievementURL(row)) },
     el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") + hc(row) }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
 
   // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
@@ -498,13 +504,14 @@
     item.append(el(item.ownerDocument, "div", { class: c(A, "AchivementCarouselItemDetails") + " sra-card" }, el(item.ownerDocument, "div", { class: c(A, "Name") }, r.title),
       el(item.ownerDocument, "div", { class: c(A, "Description") }, r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, [mode(r), r.rarityText].filter(Boolean).join(" · "))));
   };
-  const carouselItem = (doc, r, open, big) => {
+  const carouselItem = (doc, r, open, big, url) => {
     const A = K.ach(), I = K.icon();
     const item = el(doc, "div", { class: c(A, "AchievementCarouselItem") + " Panel Focusable sra-item", role: "button", tabindex: "0", "aria-label": r.title, onclick: open,
         onfocus: () => { detail(item); item.scrollIntoView({ block: "nearest", inline: "nearest" }); } },
       el(doc, "div", { class: c(A, r.unlocked ? "Achieved" : "NotAchieved") + " Panel" }, el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" },
         el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })))));
     item.sraRow = r;
+    item.sraURL = url;
     return item;
   };
 
@@ -514,10 +521,10 @@
     const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
     const label = (text) => el(doc, "h3", { class: c(A, "LockedAchievementsLabel") + " sra-h2" }, text);
     const parts = [];
-    if (unlocked.length) parts.push(carousel(doc, unlocked.map((r) => carouselItem(doc, r, open, true))));
-    if (locked.length) parts.push(label("Locked Achievements"), carousel(doc, locked.map((r) => carouselItem(doc, r, open, false))));
+    if (unlocked.length) parts.push(carousel(doc, unlocked.map((r) => carouselItem(doc, r, open, true, achievementURL(r)))));
+    if (locked.length) parts.push(label("Locked Achievements"), carousel(doc, locked.map((r) => carouselItem(doc, r, open, false, achievementURL(r)))));
     if (p.subsets?.length) parts.push(label("Subsets"), carousel(doc, p.subsets.map((sp) => carouselItem(doc, { title: subsetName(sp), description: sp.game?.title ?? "",
-      badgeURL: sp.game?.iconURL, unlocked: true, rarityText: sp.summary?.text ?? sp.message }, () => openAll(sp), true))));
+      badgeURL: sp.game?.iconURL, unlocked: true, rarityText: sp.summary?.text ?? sp.message }, () => openAll(sp), true, sp.game?.raURL))));
     const first = parts[0].querySelector(".sra-item");
     if (first) detail(first);  // the most recent unlock, before anything has focus
     return section(doc, "Achievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], progressHighlight(doc, p),
@@ -534,10 +541,11 @@
     const A = K.ach(), I = K.icon(), me = window.friendStore?.m_FriendsUIFriendStore?.self?.persona, open = () => openAll(p);
     const days = [];
     for (const r of unlocked) { const last = days.at(-1); last && last.day === r.unlockedDay ? last.rows.push(r) : days.push({ day: r.unlockedDay, rows: [r] }); }
-    const item = (r) => el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + (current.bpm ? " Panel Focusable sra-item" : " Panel sra-stat"),
-        tabindex: current.bpm ? "0" : undefined, onclick: open, onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }) },
+    // Big Picture: A opens the achievements page and X the achievement's web page; a desktop click opens the web page.
+    const item = (r) => Object.assign(el(doc, "div", { class: c(ACT, "PrimaryAchievement") + " " + c(A, "Achieved", "Featured") + (current.bpm ? " Panel Focusable sra-item" : " Panel sra-stat"),
+        tabindex: current.bpm ? "0" : undefined, onclick: current.bpm ? open : () => openRA(achievementURL(r)), onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" }) },
       el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" }, el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
-      el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description)));
+      el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description))), { sraURL: achievementURL(r) });
     const event = (rows) => el(doc, "div", { class: c(ACT, "Event", "NoCommentSupport") + " Panel" },
       el(doc, "div", { class: c(ACT, "EventHeadline") + " Panel" },
         el(doc, "div", { class: c(ACT, "EventActorAvatar") + " Panel" }, el(doc, "div", { class: c(AV, "avatarHolder") + " avatarHolder no-drag FillArea online" },
@@ -601,8 +609,9 @@
     const search = el(doc, "input", { class: "DialogInput DialogInputPlaceholder DialogTextInputBase Focusable", placeholder: "Search", type: "text",
       oninput: () => { query = search.value.trim().toLowerCase(); draw(); } });
     const list = el(doc, "div", { class: "sra-column" });
-    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel Focusable sra-li sra-item", tabindex: "-1",
-        onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
+    // A row opens its achievement's RetroAchievements page (click, or A in Big Picture).
+    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel Focusable sra-li sra-item sra-stat", tabindex: "-1",
+        onclick: () => openRA(achievementURL(r)), onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
       el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
         el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, r.description),
@@ -618,7 +627,7 @@
         : [...rows.filter((r) => r.unlocked).map(row), ...(locked.length ? [el(doc, "div", { class: c(L, "ListTitle") }, "Locked Achievements")] : []), ...locked.map(row)]));
       if (!current?.bpm || !node.isConnected) return;
       unregister();
-      takeFocus(registerNav(doc, node, nav, { [BTN.CANCEL]: "Back" })[0]);  // the rows are a column; LB/RB switch tabs, B closes
+      takeFocus(registerNav(doc, node, nav, { [BTN.OK]: "View on RetroAchievements", [BTN.CANCEL]: "Back" })[0]);  // the rows are a column; LB/RB switch tabs, B closes
     };
     const unregister = () => { nav.reverse().forEach((fn) => { try { fn(); } catch (_) {} }); nav.length = 0; };
     // Steam sends the controller's buttons to the focused row; claim the ones that would leave the page behind it.
@@ -630,7 +639,8 @@
     });
 
     const header = el(doc, "div", { class: c(P, "HeaderContainer") + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
-      el(doc, "div", { class: c(H, "Title") }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
+      // The game's (or subset's) title opens its RetroAchievements page.
+      el(doc, "div", { class: c(H, "Title") + " sra-stat", title: "View on RetroAchievements", onclick: () => openRA(p.game.raURL) }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
         el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: p.game.iconURL, alt: "" })), p.game.title),
       el(doc, "div", { class: "Panel" }, el(doc, "div", { class: c(H, "StatsBlock") }, el(doc, "div", { class: c(H, "Stat", "BigStat") },
         el(doc, "div", { class: c(H, "StatLabelAndValue") },

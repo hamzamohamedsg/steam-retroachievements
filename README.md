@@ -41,7 +41,8 @@ You play your retro games through Steam, but their achievements live on a websit
 - **Activity feed**: your unlocks grouped by day ("you achieved…"), like a Steam game's.
 - **Game details behind the (i) button**: box art, console, developer, publisher, genre and points.
 - **Big Picture mode** with **full controller support**: the D-pad moves through the achievements like any Steam game, and **A** opens the achievements page.
-- **Subsets** (Bonus, Time Attack…) each get an icon that opens their own achievements page.
+- **RetroAchievements pages one click away**: click an achievement to open its page on retroachievements.org. In Big Picture (Steam Deck too), press **X** (□ on PlayStation) on an achievement or subset, or **A** on a row of the achievements page; it opens in Steam's own browser.
+- **Subsets** (Bonus, Time Attack…) each get an icon that opens their own achievements page; click its title there to open the subset on RetroAchievements.
 - **Add Games**: scan a ROM folder, pick an emulator for each game, and add them all to Steam in one go.
 - **Knows your exact ROM**: it fingerprints ROMs with RetroAchievements' own code and warns you when a version won't unlock achievements.
 - Works with **RetroArch**, **DuckStation** (PS1), **PCSX2** (PS2), **PPSSPP** (PSP), **Dolphin** (GameCube/Wii), **Flycast** (Dreamcast) and **SkyEmu** (Game Boy family).
