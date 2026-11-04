@@ -81,6 +81,22 @@
       }
       return steamUI.modules.find((m) => keys.every((k) => typeof m[k] === "string")) ?? {};
     },
+    // The store behind Steam's own achievements views (the overlay's Achievements window), found by the map only it has (Q16).
+    achStore: undefined,
+    achievementStore: () => {
+      if (steamUI.achStore === undefined) {
+        let req;
+        webpackChunksteamui.push([[Math.random()], {}, (r) => { req = r; }]);
+        steamUI.achStore = null;
+        for (const id of Object.keys(req.m)) {
+          let ex;
+          try { ex = req(id); } catch (_) { continue; }
+          const store = ex && typeof ex === "object" && Object.values(ex).find((v) => v && typeof v === "object" && "m_mapMyAchievements" in v);
+          if (store) { steamUI.achStore = store; break; }
+        }
+      }
+      return steamUI.achStore;
+    },
     panelHost: (doc, bpm) => steamUI.findClass(doc, bpm ? "AppDetailsContent" : "RightColumn"),
     addGameButton: (doc) => steamUI.findClass(doc, "AddGameButton"),
   };
@@ -165,6 +181,12 @@
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
   /* Steam's focus ring comes from its React Focusable, which our items don't have; this stands in for it. */
   .sra-carousel .sra-item { cursor: pointer; } .sra-item:focus { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; }
+  /* Steam's own overlay windows: hardcore unlocks (marked by feedSteam) and the set switcher. */
+  img[src$="#hardcore"] { outline: 2px solid #e5b143; outline-offset: -2px; }
+  .sra-sets { display: flex; align-items: center; gap: 12px; height: 100%; }
+  .sra-sets .sra-carousel { display: flex; gap: 8px; }
+  .sra-set { background: none; border: 0; padding: 0; cursor: pointer; opacity: 0.45; } .sra-set:hover, .sra-set.sra-shown { opacity: 1; }
+  .sra-set img { display: block; width: 36px; height: 36px; border-radius: 2px; }
   `;
 
   const el = (doc, tag, props = {}, ...children) => {
@@ -423,8 +445,17 @@
         el(doc, "div", { class: c(B, "AchievementProgressRow") }, el(doc, "div", { class: c(B, "PlayBarDetailLabel", "AchievementCountLabel") }, `${earned}/${total}`),
           el(doc, "div", { class: c(B, "DetailsProgressContainer") }, fill))));
     stats.append(node);
+    // Steam draws its own copy from the details the overlay needs (feedSteam); ours stays, as it opens the achievements page.
+    const hideSteams = () => stats.querySelectorAll(sel(B.MiniAchievements)).forEach((n) => {
+      if (n !== node) { n.style.display = "none"; n.setAttribute("data-sra-hid", ""); }
+    });
+    hideSteams();
     // Steam adds Last Played and Play Time after ours as they arrive: keep Achievements last, like a Steam game's play bar.
-    const order = new MutationObserver(() => { if (!node.isConnected) order.disconnect(); else if (node.nextSibling) stats.append(node); });
+    const order = new MutationObserver(() => {
+      if (!node.isConnected) return order.disconnect();
+      hideSteams();
+      if (node.nextSibling) stats.append(node);
+    });
     order.observe(stats, { childList: true });
     return node;
   };
@@ -440,6 +471,7 @@
     const doc = steamUI.doc();
     if (!doc || !current) return;
     current.payload = payload;
+    feedSteam(current.appid, payload);
     const refocus = current.bpm && current.tab === bpmTab(doc) ? [...doc.querySelectorAll("[data-sra-panel] .sra-item")].indexOf(doc.activeElement) : -1;
     removePanel();
     current.nodes = [];
@@ -838,12 +870,89 @@
     if ((ov.rt_recent_activity_time || 0) < last) ov.rt_recent_activity_time = last;
   };
   const applyDetails = (appid) => {
-    const t = playtimes.get(appid), data = appDetailsStore.m_mapAppData.get(appid), d = data?.details;
-    if (!t || !d) return;
-    const last = Math.max(t.lastPlayed, d.rtLastTimePlayed || 0);
+    const t = playtimes.get(appid), a = steamAchievements.get(appid), data = appDetailsStore.m_mapAppData.get(appid), d = data?.details;
+    if (!d || (!t && !a)) return;
+    const minutes = t?.minutes ?? d.nPlaytimeForever, last = t ? Math.max(t.lastPlayed, d.rtLastTimePlayed || 0) : d.rtLastTimePlayed;
     // A new object: the play bar redraws when the details are replaced, not when a field changes.
-    if (d.nPlaytimeForever !== t.minutes || d.rtLastTimePlayed !== last) data.details = { ...d, nPlaytimeForever: t.minutes, rtLastTimePlayed: last };
+    if (d.nPlaytimeForever !== minutes || d.rtLastTimePlayed !== last || (a && d.achievements !== a)) {
+      data.details = { ...d, nPlaytimeForever: minutes, rtLastTimePlayed: last, achievements: a ?? d.achievements };
+    }
   };
+  // A matched game's achievements go into Steam's own stores too, so the in-game overlay draws them like a Steam game's:
+  // the toolbar's Achievements button and window, and recent unlocks in Game Overview (docs/steam-internals.md Q16).
+  const steamAchievements = new Map();  // appid → details.achievements (the main set)
+  const steamSets = new Map();  // appid → { payload, shown: RA game id of the set in Steam's window }
+  // The URL fragment marks hardcore unlocks for CSS_TEXT's gold frame; Steam has no field for it.
+  const toRows = (sp) => sp?.state !== "matched" ? [] : sp.achievements.map((r) => ({ strID: String(r.id), strName: r.title, strDescription: r.description,
+    bAchieved: r.unlocked, rtUnlocked: r.unlockedAt ?? 0, strImage: r.badgeURL + (r.unlocked && r.hardcore ? "#hardcore" : ""), bHidden: false,
+    flMinProgress: 0, flCurrentProgress: 0, flMaxProgress: 0, flAchieved: r.rarity ?? 0 }));
+  const setsOf = (p) => [p, ...(p.subsets ?? []).filter((sp) => sp.state === "matched")];
+  const feedSteam = (appid, p) => {
+    const store = steamUI.achievementStore();
+    if (!store || p?.state === "error") return;  // a failed fetch keeps what the overlay already shows
+    const main = toRows(p);
+    if (!main.length && !steamAchievements.has(appid)) return;
+    const split = (rows) => [rows.filter((r) => r.bAchieved), rows.filter((r) => !r.bAchieved)];
+    const byID = (list) => Object.fromEntries(list.map((r) => [r.strID, r]));
+    // Steam's window shows one set at a time: the main set, or the subset picked with setSwitcher.
+    const info = steamSets.get(appid) ?? {};
+    steamSets.set(appid, Object.assign(info, { payload: p, shown: main.length ? (setsOf(p).find((sp) => sp.game.id === info.shown) ?? p).game.id : null }));
+    const rows = main.length ? toRows(setsOf(p).find((sp) => sp.game.id === info.shown)) : [];
+    if (rows.length) {
+      const [achieved, unachieved] = split(rows);
+      store.m_mapMyAchievements.set(appid, { data: { achieved: byID(achieved), unachieved: byID(unachieved), hidden: {} } });
+      store.m_mapGlobalAchievements.set(appid, { data: Object.fromEntries(rows.map((r) => [r.strID, r.flAchieved])) });
+    } else {
+      store.m_mapMyAchievements.delete(appid);
+      store.m_mapGlobalAchievements.delete(appid);
+    }
+    const [achieved, unachieved] = split(main);
+    steamAchievements.set(appid, { nTotal: main.length, nAchieved: achieved.length, vecHighlight: achieved, vecUnachieved: unachieved, vecAchievedHidden: [] });
+    applyDetails(appid);
+  };
+  // The game's icon and each subset's (Bonus, Time Attack…), left of the window's Search: one switches the list to its set.
+  // Click or Enter; A on a controller in Game Mode.
+  const setSwitcher = (doc, appid, info) => {
+    const sets = setsOf(info.payload);
+    const label = el(doc, "span", { class: "sra-muted" });
+    const items = sets.map((sp, i) => el(doc, "button", { class: "sra-set sra-item", title: i ? `${subsetName(sp)} subset` : sp.game.title,
+      onclick: () => { info.shown = sp.game.id; feedSteam(appid, info.payload); paint(); } }, el(doc, "img", { src: sp.game.iconURL, alt: "" })));
+    const paint = () => sets.forEach((sp, i) => {
+      items[i].classList.toggle("sra-shown", sp.game.id === info.shown);
+      if (sp.game.id === info.shown) label.textContent = i ? `${subsetName(sp)} subset` : sp.game.title;
+    });
+    paint();
+    const node = el(doc, "div", { class: "sra-sets" }, el(doc, "div", { class: "sra-carousel" }, items), label);
+    node.sraPayload = info.payload;
+    node.sraCleanups = [];
+    return node;
+  };
+  const ensureSetSwitcher = (doc, appid, controller) => {
+    const info = steamSets.get(appid), H = steamUI.classes("StatsBlock", "BigStat", "AchievementSearchHeader");
+    if (!info?.shown || setsOf(info.payload).length < 2 || !H.LeftContent) return;
+    for (const slot of doc.querySelectorAll(sel(H.LeftContent))) {
+      if (slot.hasAttribute("data-sra")) continue;  // our own achievements page (openAll) has one too
+      const old = slot.querySelector(".sra-sets");
+      if (old?.sraPayload === info.payload) {
+        // Steam registers the page's focus tree after it draws: join it then.
+        if (controller && !old.querySelector(".sra-item")?.sraNode) registerNav(doc, old, old.sraCleanups, { [BTN.OK]: "Show achievements" });
+        continue;
+      }
+      old?.sraCleanups.forEach((fn) => { try { fn(); } catch (_) {} });
+      const node = setSwitcher(doc, appid, info);
+      ensureStyle(doc);
+      old ? old.replaceWith(node) : slot.append(node);
+      if (controller) registerNav(doc, node, node.sraCleanups, { [BTN.OK]: "Show achievements" });
+    }
+  };
+  const loadForOverlay = safe(async (appid, method) => {
+    const shortcut = await steamUI.shortcut(appid);
+    if (shortcut.exe) feedSteam(appid, await call(method, { shortcut }, 180000));
+  });
+  const overlays = new WeakMap();  // Steam's overlay window → whether it was open at the last tick
+  let lastInGame = null;  // the Game Mode in-game Achievements route at the last tick
+  const overlayDocs = () => [...g_PopupManager.m_mapPopups.values()].map((p) => p.m_popup?.document)
+    .concat((SteamUIStore.WindowStore?.OverlayWindows ?? []).map((w) => w.BrowserWindow?.document)).filter((d) => d?.head);
   // Steam rebuilds an overview from each update it gets: put the values back right after.
   const overviewProto = (() => {
     let o = Object.getPrototypeOf(appStore.m_mapApps.values().next().value ?? {});
@@ -900,6 +1009,28 @@
   const tick = safe(() => {
     if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; syncPlaytimes(); }
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
+    steamAchievements.forEach((_, id) => applyDetails(id));
+    // A shortcut's in-game overlay: its game's achievements when the game starts, fresh ones each time the overlay opens.
+    const overlayWindows = SteamUIStore.WindowStore?.OverlayWindows ?? [];
+    if (overlayWindows.length) overlayDocs().forEach(ensureStyle);  // the hardcore frame, in the overlay and the windows it opens
+    for (const w of overlayWindows) {
+      const appid = w.params?.appid, open = !!w.m_DesktopOverlay?.overlay_active, seen = overlays.has(w);
+      const achievementsDoc = w.m_DesktopOverlay?.GetPopupForWindow?.("Achievements")?.document;
+      if (appid && achievementsDoc) ensureSetSwitcher(achievementsDoc, appid, false);  // the desktop overlay: mouse and keyboard
+      if (!appid || (seen && overlays.get(w) === open) || !steamUI.isShortcut(appid)) continue;
+      overlays.set(w, open);
+      if (!seen || open) loadForOverlay(appid, seen ? "refreshPanel" : "getPanel");
+    }
+    // Game Mode (and Big Picture): the running game's Achievements page is in the main window, driven by the controller.
+    // Fresh achievements each time it opens, like the desktop overlay.
+    const gamepad = SteamUIStore.WindowStore?.GamepadUIMainWindowInstance;
+    const inGame = /^\/app\/(\d+)\/overlay\/achievements/.exec(gamepad?.m_history?.location?.pathname ?? ""), inGameApp = Number(inGame?.[1]);
+    if (inGame?.[0] !== lastInGame) {
+      lastInGame = inGame?.[0];
+      if (inGame && steamUI.isShortcut(inGameApp)) loadForOverlay(inGameApp, "refreshPanel");
+    }
+    const gamepadDoc = gamepad?.BrowserWindow?.document;
+    if (inGame && gamepadDoc) { ensureStyle(gamepadDoc); ensureSetSwitcher(gamepadDoc, inGameApp, true); }
     const surface = steamUI.surface();
     if (!surface) return;
     const doc = surface.doc;
@@ -956,7 +1087,7 @@
     }),
     // A background refresh can arrive after "Wrong game?" picked a different game: only accept the game on screen.
     update: safe((msg) => {
-      if (msg.appid !== current?.appid) return;
+      if (msg.appid !== current?.appid) return feedSteam(msg.appid, msg.payload);  // a game playing with its page closed
       if (current.payload?.game && msg.payload.game?.id !== current.payload.game.id) return;
       render(msg.payload);
     }),
@@ -964,6 +1095,11 @@
       clearInterval(interval);
       clearInterval(playtimeInterval);
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
+      for (const id of steamAchievements.keys()) feedSteam(id, null);
+      overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra], .sra-sets").forEach((n) => {
+        n.sraCleanups?.forEach((fn) => { try { fn(); } catch (_) {} });
+        n.remove();
+      }));
       try { lifetime?.unregister?.(); } catch (_) {}
       closeOverlay?.();
       removePanel();

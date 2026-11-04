@@ -40,6 +40,7 @@ You play your retro games through Steam, but their achievements live on a websit
 - **Achievements page**: **View My Achievements** opens Steam's achievements page with unlock dates, rarity, My and Global tabs, and search.
 - **Activity feed**: your unlocks grouped by day ("you achieved…"), like a Steam game's.
 - **Game details behind the (i) button**: box art, console, developer, publisher, genre and points.
+- **In-game overlay**: press Shift+Tab while playing and the **Achievements** button opens Steam's own achievements window with your RetroAchievements progress, fetched fresh each time the overlay opens. Hardcore unlocks get RetroAchievements' gold frame, and each subset has an icon next to Search that switches the list to its achievements. In Game Mode (Steam Deck) and Big Picture, the in-game menu's **Achievements** shows the same, and the controller reaches the subset icons. Recent unlocks show in **Game Overview** too.
 - **Big Picture mode** with **full controller support**: the D-pad moves through the achievements like any Steam game, and **A** opens the achievements page.
 - **RetroAchievements pages one click away**: click an achievement to open its page on retroachievements.org. In Big Picture (Steam Deck too), press **X** (□ on PlayStation) on an achievement or subset, or **A** on a row of the achievements page; it opens in Steam's own browser.
 - **Subsets** (Bonus, Time Attack…) each get an icon that opens their own achievements page; click its title there to open the subset on RetroAchievements.

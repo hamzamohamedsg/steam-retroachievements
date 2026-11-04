@@ -48,6 +48,7 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     #expect(unlocked.unlockedText == "Unlocked Jan 1, 1970 at 12:00\u{202F}AM")
     #expect(unlocked.unlockedDay == "January 1, 1970")
     #expect(locked.unlockedDay == nil)
+    #expect(unlocked.unlockedAt == 0 && locked.unlockedAt == nil)
     #expect(build(progress([ach(1, order: 1)], players: 0)).achievements[0].rarityText == nil)
 }
 

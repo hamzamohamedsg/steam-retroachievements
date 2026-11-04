@@ -29,6 +29,8 @@ public struct PanelPayload: Codable, Equatable, Sendable {
         public var unlockedDay: String?
         /// Percent of players who have it, for sorting the Global Achievements tab.
         public var rarity: Double?
+        /// The unlock as Unix seconds, for Steam's own achievements store (the in-game overlay).
+        public var unlockedAt: Int?
     }
 
     init(state: String, message: String? = nil, notice: String? = nil, consoleId: Int? = nil) {
@@ -72,7 +74,7 @@ public enum PanelBuilder {
                          unlocked: isUnlocked, hardcore: a.dateEarnedHardcore != nil,
                          unlockedText: earned(a).map { "Unlocked " + full.string(from: $0) },
                          rarityText: rarity(a).map { String(format: "%.1f%% of players have this achievement", $0) },
-                         unlockedDay: earned(a).map(day), rarity: rarity(a))
+                         unlockedDay: earned(a).map(day), rarity: rarity(a), unlockedAt: earned(a).map { Int($0.timeIntervalSince1970) })
         }
 
         if !p.achievements.isEmpty {
