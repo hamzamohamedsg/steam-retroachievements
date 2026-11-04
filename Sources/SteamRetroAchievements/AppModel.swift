@@ -37,7 +37,8 @@ import SteamBridge
                 signOut: { await AppModel.shared.signOut() },
                 setOpenAtLogin: { on in await AppModel.shared.setOpenAtLogin(on) },
                 uninstall: { await AppModel.shared.uninstall() }),
-            push: { js in await AppModel.shared.run(js) }))
+            push: { js in await AppModel.shared.run(js) },
+            folderFile: AppPaths.data.appendingPathComponent("rom-folder.txt")))
         services = credentials.map { Services(credentials: $0, dataDirectory: AppPaths.data) }
     }
 

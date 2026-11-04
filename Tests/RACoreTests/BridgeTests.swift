@@ -113,6 +113,20 @@ struct EchoHandler: BridgeHandling {
     #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }
 
+@Test func scanGamesRemembersTheFolder() async throws {
+    let root = tempDir()
+    touch(root, "snes/a.sfc")
+    let inst = installed(cores: ["snes9x"])
+    let handler = BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, installed: { inst }, hasher: PathHasher(byFile: [:]),
+                                folderFile: tempDir().appendingPathComponent("rom-folder.txt"))
+    func scannedFolder(_ folder: String) async throws -> String? {
+        let params = #"{"folder":\#(folder),"consoleOverrides":{},"emulatorOverrides":{},"shortcuts":[]}"#
+        return (try JSONSerialization.jsonObject(with: try await handler.handle(method: "scanGames", params: Data(params.utf8))) as? [String: Any])?["folder"] as? String
+    }
+    _ = try await scannedFolder("\"\(root.path)\"")
+    #expect(try await scannedFolder("null") == root.path)
+}
+
 @Test func subsetsComeAlongAsOwnPanels() async throws {
     let data = tempDir()
     let services = Services(credentials: creds, dataDirectory: data, transport: FakeTransport { _ in (Data(), 500) })

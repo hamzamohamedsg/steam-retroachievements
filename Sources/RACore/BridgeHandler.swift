@@ -45,10 +45,13 @@ public final class BridgeHandler: BridgeHandling {
     let push: @Sendable (String) async -> Void
     let installed: @Sendable () -> Installed
     let hasher: any Fingerprinting
+    /// Holds the folder Add Games scanned last, so the next scan starts there.
+    let folderFile: URL?
 
     public init(services: @escaping @Sendable () async -> Services?, actions: BridgeActions, push: @escaping @Sendable (String) async -> Void,
-                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher()) {
+                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher(), folderFile: URL? = nil) {
         self.services = services; self.actions = actions; self.push = push; self.installed = installed; self.hasher = hasher
+        self.folderFile = folderFile
     }
 
     struct ShortcutParams: Decodable { var shortcut: ShortcutInfo }
@@ -151,7 +154,15 @@ public final class BridgeHandler: BridgeHandling {
 
     private func scan(_ p: ScanParams) -> ScanResult {
         let installed = installed()
-        let folder = p.folder.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? Scanner.defaultFolder()
+        let isFolder = { (path: String) in var dir: ObjCBool = false; return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue }
+        let typed = p.folder.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        // A remembered folder that's gone (an SD card taken out) falls back to the default.
+        let remembered = folderFile.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.flatMap { isFolder($0) ? URL(fileURLWithPath: $0) : nil }
+        let folder = typed ?? remembered ?? Scanner.defaultFolder()
+        if let folderFile, typed != nil, isFolder(folder.path) {
+            try? FileManager.default.createDirectory(at: folderFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? folder.path.write(to: folderFile, atomically: true, encoding: .utf8)
+        }
         let existing = Set(p.shortcuts.compactMap { EmulatorLaunch.parse(exe: $0.exe, launchOptions: $0.launchOptions)?.romPath })
         let emulatorOverrides = Dictionary(p.emulatorOverrides.compactMap { k, v in Int(k).map { ($0, v) } }) { a, _ in a }
         let items = Scanner(installed: installed, hasher: hasher)
