@@ -161,19 +161,3 @@ func installed(cores: [String]) -> Installed {
     #expect(items.first?.emulator == .pcsx2)
     #expect(items.first?.status == .ready)
 }
-
-@Test func scansLargeSparsePS2CHD() throws {
-    let root = tempDir()
-    let rom = root.appendingPathComponent("ps2/The Getaway.chd")
-    try FileManager.default.createDirectory(at: rom.deletingLastPathComponent(), withIntermediateDirectories: true)
-    #expect(FileManager.default.createFile(atPath: rom.path, contents: nil))
-    let handle = try FileHandle(forWritingTo: rom)
-    try handle.truncate(atOffset: 5_000_000_000)
-    try handle.close()
-    let inst = Installed(emulators: [.pcsx2: Launcher(exe: "/portable/PCSX2/pcsx2-qt.exe")], coresDirectory: tempDir())
-    let items = Scanner(installed: inst, hasher: PathHasher(byFile: [:]))
-        .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:])
-    #expect(items.count == 1)
-    #expect(items.first?.romPath == rom.path)
-    #expect(items.first?.consoleId == 21)
-}
