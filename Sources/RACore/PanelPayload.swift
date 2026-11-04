@@ -80,7 +80,7 @@ public enum PanelBuilder {
         if !p.achievements.isEmpty {
             let total = p.achievements.count, pct = unlocked.count * 100 / total
             let hardcore = p.achievements.filter { $0.dateEarnedHardcore != nil }.count
-            out.summary = .init(text: "You've unlocked \(unlocked.count)/\(total) (\(pct)%)",
+            out.summary = .init(text: "You've unlocked \(pct == 100 ? "all achievements! " : "")\(unlocked.count)/\(total) (\(pct)%)",
                                 pointsText: "\(unlocked.reduce(0) { $0 + $1.points }) / \(p.achievements.reduce(0) { $0 + $1.points }) points",
                                 hardcoreText: hardcore > 0 ? "\(hardcore) in hardcore" : nil, percent: pct)
         }

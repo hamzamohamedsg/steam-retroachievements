@@ -166,6 +166,8 @@
   .sra-row select { max-width: 170px; }
   /* Steam-classed panel: only what Steam's classes leave to unlisted helpers (docs/steam-internals.md Q13). */
   :where(.sra-h2) { margin: 0; font: unset; }
+  /* AllAchieved's room for the ribbon; Big Picture loads Highlight's padding after it, which put the ribbon over the text. */
+  .sra-perfect[data-sra] { padding-inline-start: 46px; }
   .sra-iconrow { width: 100%; height: 100%; display: flex; flex-direction: row; } .sra-iconrow > div { height: 100%; }
   .sra-hc img { outline: 2px solid #e5b143; outline-offset: -2px; }  /* RetroAchievements' gold frame for hardcore unlocks (the img is positioned, so it'd cover its wrapper's outline) */
   .sra-li { margin-bottom: 8px; }
@@ -341,15 +343,25 @@
     return node;
   };
 
-  // "You've unlocked 3/35 (8%)" over a progress bar.
+  // Steam's perfect-game ribbon (its full-colour achievement icon).
+  const RIBBON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"><path stroke="url(#sra-ribbon-stroke)" fill="url(#sra-ribbon-fill)" stroke-width="1.5" d="M10.1777 10.0258L10.3929 9.80693V9.49999V5.52777H14.2857H14.6001L14.8205 5.30358L18 2.06976L21.1795 5.30358L21.3999 5.52777H21.7143H25.6071V9.50001V9.80696L25.8223 10.0258L28.5553 12.8055L25.8223 15.5853L25.6071 15.8041V16.1111V20.0833H21.7143H21.3999L21.1795 20.3075L18 23.5413L14.8205 20.3075L14.6001 20.0833H14.2857H10.3929V16.1111V15.8042L10.1777 15.5853L7.44464 12.8055L10.1777 10.0258ZM14.7399 28.0317L11.56 33.4221L9.85164 29.9469L9.6456 29.5278H9.17857H6.29474L8.68445 25.3611H12.1142L14.7399 28.0317ZM26.8214 29.5278H26.3544L26.1484 29.9469L24.44 33.4221L21.2601 28.0317L23.8858 25.3611H27.3155L29.7053 29.5278H26.8214Z"></path><circle stroke="#FFAB2C" fill="#FFC82C" cx="18" cy="13" r="5.5"></circle><defs><linearGradient id="sra-ribbon-fill" x1="7.08" y1="3.72" x2="33.6694" y2="25.0697" gradientUnits="userSpaceOnUse"><stop stop-color="#0056D6"></stop><stop offset="1" stop-color="#1A9FFF"></stop></linearGradient><linearGradient id="sra-ribbon-stroke" x1="7.08" y1="3.72" x2="33.6694" y2="25.0697" gradientUnits="userSpaceOnUse"><stop stop-color="#0056D6"></stop><stop offset="1" stop-color="#1A9FFF"></stop></linearGradient></defs></svg>';
+  const ribbon = (doc, cls) => {
+    const t = doc.createElement("template");
+    t.innerHTML = RIBBON_SVG;
+    t.content.firstChild.setAttribute("class", cls);
+    return t.content.firstChild;
+  };
+
+  // "You've unlocked 3/35 (8%)" over a progress bar; a perfect set gets Steam's gold highlight and ribbon.
   const progressHighlight = (doc, p) => {
-    const A = K.ach(), D = K.details(), s = p.summary;
+    const A = K.ach(), D = K.details(), s = p.summary, perfect = s?.percent === 100;
     const fill = el(doc, "div", { class: c(A, "AchievementProgress") });
     fill.style.width = `${s?.percent ?? 0}%`;
-    return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv") },
+    return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv", ...(perfect ? ["AllAchieved"] : [])) + (perfect ? " sra-perfect" : "") },
       el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, s.text.replace(/\s*\(\d+%\)$/, "")), " ",
         el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`)] : el(doc, "span", {}, p.message)),
       s && el(doc, "div", { class: c(A, "AchievementProgressContainer") }, fill),
+      perfect && ribbon(doc, c(A, "Ribbon")),
       el(doc, "div", { class: c(A, "GlobalStatLabel") }));
   };
 
@@ -670,13 +682,15 @@
       else if (b === BTN.DIR_LEFT || b === BTN.DIR_RIGHT || (b === BTN.DIR_UP && at <= 0) || (b === BTN.DIR_DOWN && at === items.length - 1)) handled(e);
     });
 
-    const header = el(doc, "div", { class: c(P, "HeaderContainer") + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
+    const perfect = total > 0 && earned === total;  // like Steam: PerfectGame header, ribbon and "You've unlocked all achievements!"
+    const header = el(doc, "div", { class: c(P, "HeaderContainer", ...(perfect ? ["PerfectGame"] : [])) + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
       // The game's (or subset's) title opens its RetroAchievements page.
       el(doc, "div", { class: c(H, "Title") + " sra-stat", title: "View on RetroAchievements", onclick: () => openRA(p.game.raURL) }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
         el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: p.game.iconURL, alt: "" })), p.game.title),
-      el(doc, "div", { class: "Panel" }, el(doc, "div", { class: c(H, "StatsBlock") }, el(doc, "div", { class: c(H, "Stat", "BigStat") },
+      el(doc, "div", { class: "Panel" }, el(doc, "div", { class: c(H, "StatsBlock") }, el(doc, "div", { class: c(H, "Stat", "BigStat") }, perfect && ribbon(doc, c(H, "Ribbon")),
         el(doc, "div", { class: c(H, "StatLabelAndValue") },
-          el(doc, "div", { class: c(H, "ProgressLabel") }, el(doc, "div", { class: c(H, "Label") }, `${earned} of ${total} achievements earned`), el(doc, "div", { class: c(H, "Label") }, `(${pct}%)`)),
+          el(doc, "div", { class: c(H, "ProgressLabel") }, el(doc, "div", { class: c(H, "Label") },
+            perfect ? `You've unlocked all achievements! ${earned}/${total}` : `${earned} of ${total} achievements earned`), el(doc, "div", { class: c(H, "Label") }, `(${pct}%)`)),
           el(doc, "div", { class: c(H, "Progress") }, bar(pct)))))))));
     const tabbed = el(doc, "div", { class: c(T, "GamepadTabbedPage", "CanBeHeaderBackground") + " Panel" },
       el(doc, "div", { class: c(T, "TabHeaderRowWrapper", "Pinned") }, el(doc, "div", { class: c(T, "TabRow") }, el(doc, "div", { class: c(T, "TabRowTabs") },

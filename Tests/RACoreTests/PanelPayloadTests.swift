@@ -38,6 +38,11 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     #expect(p.game?.raURL == "https://retroachievements.org/game/1446")
 }
 
+@Test func perfectSetSaysSoLikeSteam() {
+    let p = build(progress([ach(1, order: 1, earned: Date(timeIntervalSince1970: 0)), ach(2, order: 2, earned: Date(timeIntervalSince1970: 0))]))
+    #expect(p.summary?.text == "You've unlocked all achievements! 2/2 (100%)")
+}
+
 @Test func rarityAndBadges() {
     let p = build(progress([ach(1, order: 1, awarded: 5), ach(2, order: 2, earned: Date(timeIntervalSince1970: 0))]))
     let locked = p.achievements.first { !$0.unlocked }!, unlocked = p.achievements.first { $0.unlocked }!
