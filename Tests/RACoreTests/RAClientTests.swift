@@ -71,6 +71,7 @@ final class CountingRA: RAProviding, @unchecked Sendable {
     }
     func gameProgress(gameId: Int) async throws -> RAGameProgress { fatalError("unused") }
     func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { [] }
+    func recentUnlocks(minutes: Int) async throws -> [RAUnlock] { [] }
 }
 
 final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_700_000_000) }
@@ -109,6 +110,7 @@ struct FailingRA: RAProviding {
     func gameList(consoleId: Int) async throws -> [RAGameListEntry] { throw RAError.http(503) }
     func gameProgress(gameId: Int) async throws -> RAGameProgress { throw RAError.http(503) }
     func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { throw RAError.http(503) }
+    func recentUnlocks(minutes: Int) async throws -> [RAUnlock] { throw RAError.http(503) }
 }
 
 @Test func staleGameListServesWhenRAIsDown() async throws {

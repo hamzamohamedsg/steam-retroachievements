@@ -1075,6 +1075,44 @@
     }));
   } catch (e) { log("error", `lifetime notifications unavailable: ${e?.message ?? e}`); }
 
+  // ---------------------------------------------------------------- unlock toasts
+  // While a shortcut matched to an RA game runs, RA is asked for new unlocks every 3 s; each one gets Steam's own achievement toast.
+  const sessions = new Map();  // running shortcut → { since, matched, busy, next }
+  const toasted = new Set();   // "achievement:date", so each unlock pops once
+  const toast = (appid, u) => {
+    const [eType, target] = Object.entries(NotificationStore.GetNotificationTargets()).find(([, t]) => t.strTest === "Achievement") ?? [];
+    if (!target) return log("error", "Steam's achievement toast not found");
+    const data = target.proto.fromObject({ achievement_id: String(u.id), appid, name: u.title, description: u.description, image_url: u.image, achieved: true, rtime_unlocked: u.date });
+    // Where Steam's client sends a native unlock (Q17): it shows in Game Mode, the game's overlay, or the desktop corner.
+    NotificationStore.OnNotification(NotificationStore.m_nNextTestNotificationID++, Number(eType), data.serializeBinary());
+  };
+  const pollUnlocks = safe(async () => {
+    const running = new Set((SteamUIStore.RunningApps ?? []).map((a) => a.appid).filter((id) => steamUI.isShortcut(id)));
+    for (const id of sessions.keys()) if (!running.has(id)) sessions.delete(id);
+    for (const appid of running) {
+      let s = sessions.get(appid);
+      if (!s) sessions.set(appid, s = { since: Date.now() / 1000, matched: null, busy: false, next: 0 });
+      if (s.busy || s.matched === false || Date.now() < s.next) continue;
+      s.busy = true;
+      try {
+        if (s.matched === null) {
+          const shortcut = await steamUI.shortcut(appid);
+          if (!shortcut.exe) continue;  // Steam's details didn't arrive in time: ask again next round
+          s.matched = (await call("getPanel", { shortcut }, 180000))?.state === "matched";
+          if (!s.matched) continue;
+        }
+        for (const u of await call("unlocks", { since: s.since })) {
+          const key = `${u.id}:${u.date}`;
+          if (!toasted.has(key)) { toasted.add(key); toast(appid, u); }
+        }
+      } catch (e) {
+        s.next = Date.now() + 30000;  // RA unreachable or refusing: back off
+        log("error", `unlocks: ${e?.message ?? e}`);
+      } finally { s.busy = false; }
+    }
+  });
+  const unlockInterval = setInterval(pollUnlocks, 3000);
+
   const interval = setInterval(tick, 500);
 
   window.__sra = {
@@ -1094,6 +1132,7 @@
     dispose: safe(() => {
       clearInterval(interval);
       clearInterval(playtimeInterval);
+      clearInterval(unlockInterval);
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
       for (const id of steamAchievements.keys()) feedSteam(id, null);
       overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra], .sra-sets").forEach((n) => {

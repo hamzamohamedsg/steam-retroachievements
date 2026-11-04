@@ -77,6 +77,9 @@ public final class BridgeHandler: BridgeHandling {
     struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
     /// Steam's own units: whole minutes, and a Unix time.
     struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks: Int }
+    /// `since`: when the game started, a Unix time.
+    struct UnlocksParams: Decodable { var since: Double }
+    struct Unlock: Encodable { var id: Int; var title, description, image: String; var date: Int }
 
     public func handle(method: String, params: Data) async throws -> Data {
         let d = JSONDecoder()
@@ -125,6 +128,15 @@ public final class BridgeHandler: BridgeHandling {
             let p = try d.decode(PlaytimeParams.self, from: params)
             guard let s = await services() else { return try encode([Playtime]()) }
             return try encode(await playtimes(p.shortcuts, s))
+        case "unlocks":
+            let p = try d.decode(UnlocksParams.self, from: params)
+            guard let s = await services() else { return try encode([Unlock]()) }
+            // Ten minutes back covers an unlock that reaches RA late; a minute before `since` allows for clock drift.
+            let since = Date(timeIntervalSince1970: p.since - 60)
+            return try encode(try await s.ra.recentUnlocks(minutes: 10).filter { $0.date >= since }.map {
+                Unlock(id: $0.achievementId, title: $0.title, description: $0.description,
+                       image: "\(PanelBuilder.media)/Badge/\($0.badgeName).png", date: Int($0.date.timeIntervalSince1970))
+            })
         case "openURL":
             let p = try d.decode(URLParams.self, from: params)
             guard BridgeRouter.isAllowedExternalURL(p.url), let url = URL(string: p.url) else { throw BridgeError.urlNotAllowed }

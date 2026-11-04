@@ -133,3 +133,19 @@ struct EchoHandler: BridgeHandling {
     #expect(payload.subsets[0].achievements.map(\.id) == [2, 3])
     #expect(payload.subsets[0].summary?.text == "You've unlocked 1/2 (50%)")
 }
+
+@Test func unlocksSinceSessionStart() async throws {
+    // One unlock from this session, one from long before it (the previous session) that the 10-minute window still returns.
+    let recent = Data(#"""
+    [{"Date":"2026-11-04 12:00:30","HardcoreMode":1,"AchievementID":9,"Title":"Coins","Description":"Get 100","BadgeName":"250336","Points":5},
+     {"Date":"2026-11-04 11:55:00","HardcoreMode":0,"AchievementID":8,"Title":"Old","Description":"Earlier","BadgeName":"1","Points":1}]
+    """#.utf8)
+    let transport = FakeTransport { url in url.path.hasSuffix("RecentAchievements.php") ? (recent, 200) : (Data(), 500) }
+    let services = Services(credentials: creds, dataDirectory: tempDir(), transport: transport)
+    let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
+    let since = RADate.formatter.date(from: "2026-11-04 12:00:00")!.timeIntervalSince1970
+    let result = try await handler.handle(method: "unlocks", params: Data(#"{"since":\#(since)}"#.utf8))
+    #expect(String(decoding: result, as: UTF8.self)
+        == #"[{"date":\#(Int(since) + 30),"description":"Get 100","id":9,"image":"https:\/\/media.retroachievements.org\/Badge\/250336.png","title":"Coins"}]"#)
+    #expect(transport.urls[0].query?.contains("m=10&u=Max%20Milyin") == true)
+}

@@ -33,6 +33,8 @@ public protocol RAProviding: Sendable {
     func gameProgress(gameId: Int) async throws -> RAGameProgress
     /// 50 games of the user's play history, newest first, starting at `offset`.
     func recentlyPlayed(offset: Int) async throws -> [RARecentGame]
+    /// The user's unlocks from the last `minutes`.
+    func recentUnlocks(minutes: Int) async throws -> [RAUnlock]
 }
 
 public final class RAClient: RAProviding {
@@ -57,6 +59,10 @@ public final class RAClient: RAProviding {
 
     public func recentlyPlayed(offset: Int) async throws -> [RARecentGame] {
         try decode([RARecentGame].self, try await request("API_GetUserRecentlyPlayedGames.php", ["u": credentials.username, "c": "50", "o": "\(offset)"]))
+    }
+
+    public func recentUnlocks(minutes: Int) async throws -> [RAUnlock] {
+        try decode([RAUnlock].self, try await request("API_GetUserRecentAchievements.php", ["u": credentials.username, "m": "\(minutes)"]))
     }
 
     private func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
@@ -142,6 +148,8 @@ public final class CachedRA: RAProviding {
     }
 
     public func recentlyPlayed(offset: Int) async throws -> [RARecentGame] { try await client.recentlyPlayed(offset: offset) }
+
+    public func recentUnlocks(minutes: Int) async throws -> [RAUnlock] { try await client.recentUnlocks(minutes: minutes) }
 
     public func cachedProgress(gameId: Int) -> (value: RAGameProgress, savedAt: Date)? {
         cache.get("progress-\(gameId)", as: RAGameProgress.self)

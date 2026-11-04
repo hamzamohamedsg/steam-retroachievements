@@ -125,6 +125,19 @@ public struct RARecentGame: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey { case gameId = "GameID", lastPlayed = "LastPlayed" }
 }
 
+/// An achievement the user unlocked, from RA's recent unlocks.
+public struct RAUnlock: Codable, Equatable, Sendable {
+    public var achievementId: Int
+    public var title: String
+    public var description: String
+    public var badgeName: String
+    public var date: Date
+
+    enum CodingKeys: String, CodingKey {
+        case achievementId = "AchievementID", title = "Title", description = "Description", badgeName = "BadgeName", date = "Date"
+    }
+}
+
 enum RADate {
     static let formatter: DateFormatter = {
         let f = DateFormatter()
