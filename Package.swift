@@ -24,7 +24,8 @@ let package = Package(
         .target(name: "CHDReader", dependencies: ["rcheevos", "chdr"]),
         .target(name: "RACore", dependencies: ["rcheevos", "CHDReader", "SteamBridge"]),
         .testTarget(name: "RACoreTests", dependencies: ["RACore"], resources: [.copy("Fixtures")]),
-        .target(name: "SteamBridge"),
+        .target(name: "SteamBridge", dependencies: [.target(name: "CWinHTTP", condition: .when(platforms: [.windows]))]),
+        .systemLibrary(name: "CWinHTTP", path: "Sources/CWinHTTP"),
         .executableTarget(name: "SteamRetroAchievements", dependencies: ["RACore", "SteamBridge"]),
         .testTarget(name: "SteamBridgeTests", dependencies: ["SteamBridge"]),
     ]

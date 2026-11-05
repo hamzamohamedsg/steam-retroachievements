@@ -34,7 +34,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     let marker: DebugMarker
     let script: () -> String
     let onBinding: @Sendable (String) async -> String?
-    private var socket: URLSessionWebSocketTask?
+    private var socket: DevToolsSocket?
     private var nextId = 1
     private var pending: [Int: CheckedContinuation<JSONBox, Error>] = [:]
     private var poller: Task<Void, Never>?
@@ -147,7 +147,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         return URLSession(configuration: config)
     }()
 
-    private nonisolated static func fetchTargets() async -> Result<[CDPTarget], Error> {
+    nonisolated static func fetchTargets() async -> Result<[CDPTarget], Error> {
         var req = URLRequest(url: listURL, timeoutInterval: 2)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         do {
@@ -162,12 +162,10 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     private var lastPortError: String?
 
     private func connect(_ url: URL) async {
-        let ws = URLSession.shared.webSocketTask(with: url)
-        ws.maximumMessageSize = 64 * 1024 * 1024
-        socket = ws
-        ws.resume()
-        receiveLoop(ws)
         do {
+            let ws = try await DevToolsSocket.open(url, maximumMessageSize: 64 * 1024 * 1024)
+            socket = ws
+            receiveLoop(ws)
             _ = try await call("Runtime.enable", [:])
             _ = try await call("Runtime.addBinding", ["name": "__sra_send"])
             _ = try await evaluate(script())
@@ -179,7 +177,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     }
 
     private func disconnect() {
-        socket?.cancel(with: .goingAway, reason: nil)
+        socket?.close()
         socket = nil
         for (_, c) in pending { c.resume(throwing: SteamError.notConnected) }
         pending = [:]
@@ -199,25 +197,22 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
                 try? await Task.sleep(for: .seconds(Self.callTimeout))
                 self?.pending.removeValue(forKey: id)?.resume(throwing: SteamError.timedOut)
             }
-            socket.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
+            socket.send(String(decoding: data, as: UTF8.self)) { [weak self] error in
                 guard let error else { return }
                 Task { @MainActor in self?.pending.removeValue(forKey: id)?.resume(throwing: error) }
             }
         }.value
     }
 
-    private func receiveLoop(_ ws: URLSessionWebSocketTask) {
-        ws.receive { [weak self] result in
-            Task { @MainActor in
+    private func receiveLoop(_ ws: DevToolsSocket) {
+        Task { [weak self] in
+            for await text in ws.messages {
                 guard let self, self.socket === ws else { return }
-                switch result {
-                case .failure:
-                    self.disconnect()
-                case .success(let message):
-                    if case .string(let text) = message { self.handle(text) }
-                    self.receiveLoop(ws)
-                }
+                self.handle(text)
             }
+            // The connection ended: Steam quit or closed it.
+            guard let self, self.socket === ws else { return }
+            self.disconnect()
         }
     }
 
