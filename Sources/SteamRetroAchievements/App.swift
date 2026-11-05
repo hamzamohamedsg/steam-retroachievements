@@ -64,6 +64,7 @@ struct MenuContent: View {
 enum Headless {
     @MainActor static func main() async {
         #if os(Windows)
+        Tray.replaceRunningCopy()
         Tray.start()
         #endif
         AppModel.shared.launch()

@@ -16,6 +16,23 @@ enum Tray {
         Thread.detachNewThread { run() }
     }
 
+    /// One copy at a time, the newest (as on Linux): a copy started by hand, an update say, asks the one already running
+    /// to quit the way its Quit item does, so an old version doesn't keep answering Steam beside it. Runs before this copy's own icon.
+    static func replaceRunningCopy() {
+        "SteamRetroAchievementsTray".withCString(encodedAs: UTF16.self) { className in
+            // A few rounds at most: a copy that can't be stopped must not keep this one from starting.
+            for _ in 0..<4 {
+                guard let hwnd = FindWindowExW(HWND(bitPattern: -3), nil, className, nil) else { return }
+                var pid: DWORD = 0
+                GetWindowThreadProcessId(hwnd, &pid)
+                guard pid != GetCurrentProcessId(), let process = OpenProcess(DWORD(SYNCHRONIZE) | DWORD(PROCESS_TERMINATE), false, pid) else { return }
+                PostMessageW(hwnd, UINT(WM_COMMAND), WPARAM(quitCommand), 0)
+                if WaitForSingleObject(process, 5000) != 0 { TerminateProcess(process, 1) }  // 0: it exited
+                CloseHandle(process)
+            }
+        }
+    }
+
     private static func run() {
         let instance = GetModuleHandleW(nil)
         "SteamRetroAchievementsTray".withCString(encodedAs: UTF16.self) { className in
