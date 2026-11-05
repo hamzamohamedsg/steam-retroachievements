@@ -31,9 +31,20 @@ import Testing
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: true, now: t0 + 11) == .connecting)
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 20) == .connecting)
     #expect(SteamConnection.decide(steamRunning: true, steamLaunched: t0 + 10, markerCreated: t0, portAnswered: false, now: t0 + 31) == .needsRestart)
-    // Steam's port answering proves it's open with the switch on, even if the process check missed it (Windows' tasklist).
+    // Steam's port answering proves it's open with the switch on, even if the process check missed it.
     #expect(SteamConnection.decide(steamRunning: false, steamLaunched: nil, markerCreated: t0, portAnswered: true, now: t0) == .connecting)
 }
+
+#if os(Windows)
+@Test func findsARunningProgramAndWhenItStarted() throws {
+    let me = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).lastPathComponent
+    let found = SteamConnection.runningProgram(me.uppercased())
+    #expect(found.running)
+    let started = try #require(found.launched)
+    #expect(started <= Date() && started > Date() - 3600)
+    #expect(!SteamConnection.runningProgram("no-such-program-\(UUID().uuidString).exe").running)
+}
+#endif
 
 @Test func windowsCommandLineQuotesLikeCommandLineToArgvW() {
     #expect(windowsCommandLine([#"C:\Windows\System32\tasklist.exe"#, "/FI", "IMAGENAME eq steam.exe", "/NH"])

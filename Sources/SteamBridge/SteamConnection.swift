@@ -5,6 +5,9 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if os(Windows)
+import WinSDK
+#endif
 
 public struct CDPTarget: Decodable, Equatable, Sendable {
     public let id, title, type: String
@@ -83,7 +86,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
     }
 
     /// Steam reads the marker only at launch, so a Steam started before the marker (or one that never opens the port) needs a restart.
-    /// A port that answers wins: the process check can miss Steam (it reads tasklist's output on Windows), and must not block connecting.
+    /// A port that answers wins: the process check can miss Steam (a Flatpak's own process names, say), and must not block connecting.
     public nonisolated static func decide(steamRunning: Bool, steamLaunched: Date?, markerCreated: Date?, portAnswered: Bool, now: Date) -> SteamState {
         if portAnswered { return .connecting }
         guard steamRunning else { return .steamNotRunning }
@@ -126,8 +129,7 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
         return (app != nil, app?.launchDate)
         #elseif os(Windows)
-        let out = runProcess("C:\\Windows\\System32\\tasklist.exe", ["/FI", "IMAGENAME eq steam.exe", "/NH"]).output
-        return (out.lowercased().contains("steam.exe"), nil)
+        return runningProgram("steam.exe")
         #else
         let pids = (try? FileManager.default.contentsOfDirectory(atPath: "/proc")) ?? []
         let running = pids.contains { pid in
@@ -137,6 +139,35 @@ struct JSONBox: @unchecked Sendable { let value: [String: Any] }
         return (running, nil)
         #endif
     }
+
+    #if os(Windows)
+    /// Whether a program with this file name is running, and when it started. In-process: starting tasklist.exe every 3 s
+    /// while Steam is closed cost more CPU than anything else the app did then.
+    nonisolated static func runningProgram(_ exe: String) -> (running: Bool, launched: Date?) {
+        let snapshot = CreateToolhelp32Snapshot(DWORD(TH32CS_SNAPPROCESS), 0)
+        guard let snapshot, snapshot != INVALID_HANDLE_VALUE else { return (false, nil) }
+        defer { CloseHandle(snapshot) }
+        var entry = PROCESSENTRY32W()
+        entry.dwSize = DWORD(MemoryLayout<PROCESSENTRY32W>.size)
+        var more = Process32FirstW(snapshot, &entry)
+        while more {
+            let name = withUnsafeBytes(of: entry.szExeFile) { String(decoding: $0.bindMemory(to: WCHAR.self).prefix { $0 != 0 }, as: UTF16.self) }
+            if name.lowercased() == exe.lowercased() { return (true, processStart(entry.th32ProcessID)) }
+            more = Process32NextW(snapshot, &entry)
+        }
+        return (false, nil)
+    }
+
+    nonisolated static func processStart(_ pid: DWORD) -> Date? {
+        guard let process = OpenProcess(DWORD(PROCESS_QUERY_LIMITED_INFORMATION), false, pid) else { return nil }
+        defer { CloseHandle(process) }
+        var created = FILETIME(), exited = FILETIME(), kernel = FILETIME(), user = FILETIME()
+        guard GetProcessTimes(process, &created, &exited, &kernel, &user) else { return nil }
+        // FILETIME counts 100 ns steps since 1601.
+        let ticks = UInt64(created.dwHighDateTime) << 32 | UInt64(created.dwLowDateTime)
+        return Date(timeIntervalSince1970: Double(ticks) / 10_000_000 - 11_644_473_600)
+    }
+    #endif
 
     /// A session of its own: on Windows a request's `timeoutInterval` isn't honoured for a refused connection (it took 60 s to fail),
     /// so the timeouts are set on the session too, which keeps the "is Steam's port open" check quick.
