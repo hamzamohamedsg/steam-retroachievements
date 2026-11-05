@@ -23,6 +23,17 @@ enum LoginItem {
         let args = on ? ["add", key, "/v", name, "/t", "REG_SZ", "/d", "\"\(AppPaths.executable)\"", "/f"] : ["delete", key, "/v", name, "/f"]
         if runProcess(reg, args).status != 0, isEnabled != on { throw CocoaError(.fileWriteUnknown) }
     }
+
+    /// Whether the Run value starts this copy of the program, rather than one in another folder (an older version's).
+    static var startsThisCopy: Bool {
+        let out = runProcess(reg, ["query", key, "/v", name]).output
+        let value = out.components(separatedBy: "REG_SZ").dropFirst().first ?? ""
+        // Paths take either slash and any case on Windows.
+        func normal(_ s: String) -> String {
+            s.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(["\""])).replacingOccurrences(of: "\\", with: "/").lowercased()
+        }
+        return normal(value) == normal(AppPaths.executable)
+    }
 }
 #else
 import SteamBridge

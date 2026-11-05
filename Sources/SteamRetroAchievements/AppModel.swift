@@ -62,6 +62,9 @@ import SteamBridge
             _ = setOpenAtLogin(true)
         }
         let freshMarker = !marker.exists()
+        #elseif os(Windows)
+        // The Run value starts the copy that set it: point it at this one, so an update unzipped somewhere else is the one that starts at login.
+        if LoginItem.isEnabled, !LoginItem.startsThisCopy { _ = setOpenAtLogin(true) }
         #endif
         steam.onStateChange = { [weak self] state in
             guard let self else { return }
