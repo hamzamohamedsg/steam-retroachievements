@@ -12,7 +12,19 @@
     pending.set(id, { resolve, reject, timer });
     window.__sra_send(JSON.stringify({ id, method, params }));
   });
-  const log = (level, message) => { try { window.__sra_send(JSON.stringify({ id: 0, method: "log", params: { level, message: String(message) } })); } catch (_) {} };
+  // Something Steam changed breaks the 500 ms tick on every run: each distinct error goes to the log once a minute, not twice a second.
+  const reported = new Map();  // error text → when it was last sent
+  const log = (level, message) => {
+    try {
+      const text = String(message), now = Date.now();
+      if (level === "error") {
+        if (now - (reported.get(text) ?? -Infinity) < 60000) return;
+        if (reported.size >= 100) reported.clear();
+        reported.set(text, now);
+      }
+      window.__sra_send(JSON.stringify({ id: 0, method: "log", params: { level, message: text } }));
+    } catch (_) {}
+  };
   const safe = (fn) => (...args) => {
     try {
       const r = fn(...args);
