@@ -967,21 +967,24 @@
   let lastInGame = null;  // the Game Mode in-game Achievements route at the last tick
   const overlayDocs = () => [...g_PopupManager.m_mapPopups.values()].map((p) => p.m_popup?.document)
     .concat((SteamUIStore.WindowStore?.OverlayWindows ?? []).map((w) => w.BrowserWindow?.document)).filter((d) => d?.head);
-  // Steam rebuilds an overview from each update it gets: put the values back right after.
-  const overviewProto = (() => {
+  // Steam rebuilds an overview from each update it gets: put the values back right after. The prototype is found through
+  // an app Steam has loaded, and at login the script often arrives before Steam has any: each tick looks again until then.
+  let overviewProto = null, initFromProto = null;
+  const hookOverviews = () => {
+    if (overviewProto) return;
     let o = Object.getPrototypeOf(appStore.m_mapApps.values().next().value ?? {});
     while (o && !Object.prototype.hasOwnProperty.call(o, "InitFromProto")) o = Object.getPrototypeOf(o);
-    return o;
-  })();
-  const initFromProto = overviewProto?.InitFromProto.sraOriginal ?? overviewProto?.InitFromProto;
-  if (initFromProto) {
-    overviewProto.InitFromProto = function (...args) {
+    if (!o) return;
+    overviewProto = o;
+    initFromProto = o.InitFromProto.sraOriginal ?? o.InitFromProto;
+    o.InitFromProto = function (...args) {
       const r = initFromProto.apply(this, args);
       try { applyOverview(this); } catch (_) {}
       return r;
     };
-    overviewProto.InitFromProto.sraOriginal = initFromProto;
-  }
+    o.InitFromProto.sraOriginal = initFromProto;
+  };
+  hookOverviews();
   // All shortcuts, or one (after it was played). Shortcuts the app no longer has playtime for go back to none.
   const syncPlaytimes = safe(async (only) => {
     const rows = (await call("playtimes", { shortcuts: only ? [only] : await listShortcuts() }, 600000)) ?? [];
@@ -1021,6 +1024,7 @@
 
   let lastDoc = null, lastAppid = null;
   const tick = safe(() => {
+    hookOverviews();
     if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; syncPlaytimes(); }
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     steamAchievements.forEach((_, id) => applyDetails(id));
