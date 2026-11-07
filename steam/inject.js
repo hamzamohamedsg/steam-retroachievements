@@ -827,7 +827,7 @@
     if (!doc) { pendingOpen = openAddGames; return; }
     ensureStyle(doc);
     const consoles = await call("consoles");
-    const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false };
+    const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false, added: [] };
     const folder = el(doc, "input", { class: "sra-input", placeholder: "ROM folder", spellcheck: "false", onkeydown: (e) => { if (e.key === "Enter") scan(); } });
     const list = el(doc, "div", { class: "sra-dialog-body" });
     const footer = el(doc, "div", { class: "sra-footer" });
@@ -859,7 +859,7 @@
       st.busy = true;
       drawFooter("Scanning…");
       try {
-        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: await listShortcuts(),
+        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: [...await listShortcuts(), ...st.added],
           consoleOverrides: st.consoleOverrides, emulatorOverrides: st.emulatorOverrides }, 180000);
         folder.value = r.folder;
         st.items = r.items;
@@ -876,6 +876,8 @@
       st.busy = true;
       drawFooter("Adding…");
       const results = await addShortcuts(items.map((i) => i.shortcut));
+      // Steam's details for a new shortcut lag behind the add: without this the scan below offers the same games again.
+      st.added.push(...items.filter((_, n) => !results[n].error).map((i) => i.shortcut));
       const errors = results.filter((r) => r.error).map((r) => `${r.name}: ${r.error}`);
       await scan([`Added ${results.length - errors.length} games to Steam.`, ...errors].join("\n"));
     });
