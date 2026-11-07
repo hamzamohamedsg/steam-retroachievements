@@ -161,3 +161,43 @@ func installed(cores: [String]) -> Installed {
     #expect(items.first?.emulator == .pcsx2)
     #expect(items.first?.status == .ready)
 }
+
+// Wii and GameCube run on Dolphin or RetroArch's Dolphin core, whichever is there; Dolphin wins when both are.
+@Test func wiiUsesEitherDolphinOrRetroArch() {
+    let root = tempDir()
+    touch(root, "wii/game.rvz")
+    let scan = { (emulators: [Emulator], cores: [String], overrides: [Int: Emulator]) -> ScanItem? in
+        let inst = installed(cores: cores)
+        let found = Installed(emulators: Dictionary(uniqueKeysWithValues: emulators.map { ($0, Launcher(exe: "/A/\($0.displayName)")) }), coresDirectory: inst.coresDirectory)
+        return Scanner(installed: found, hasher: PathHasher(byFile: [:]))
+            .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: overrides).first
+    }
+    let retroarch = scan([.retroarch], ["dolphin"], [:])
+    #expect(retroarch?.emulator == .retroarch && retroarch?.status == .ready)
+    #expect(retroarch?.coreFile?.hasSuffix("/dolphin_libretro.\(Installed.coreExtension)") == true)
+    #expect(scan([.dolphin, .retroarch], ["dolphin"], [:])?.emulator == .dolphin)
+    #expect(scan([.dolphin, .retroarch], ["dolphin"], [19: .retroarch])?.emulator == .retroarch)
+    #expect(scan([.retroarch], [], [:])?.status == .noEmulator("In RetroArch, open Online Updater → Core Downloader and get dolphin, or install Dolphin."))
+    #expect(scan([], [], [:])?.status == .noEmulator("Install Dolphin or RetroArch."))
+}
+
+// Every console offers each emulator that can run it, not just the default.
+@Test func everyConsoleOffersAllItsEmulators() {
+    #expect(EmulatorPreference.order(for: 12) == [.duckstation, .retroarch])
+    #expect(EmulatorPreference.order(for: 21) == [.pcsx2, .retroarch])
+    #expect(EmulatorPreference.order(for: 41) == [.ppsspp, .retroarch])
+    #expect(EmulatorPreference.order(for: 16) == [.dolphin, .retroarch])
+    #expect(EmulatorPreference.order(for: 19) == [.dolphin, .retroarch])
+    #expect(EmulatorPreference.order(for: 40) == [.flycast, .retroarch])
+    #expect(EmulatorPreference.order(for: 27) == [.retroarch, .flycast])
+    for gameBoy in [4, 5, 6] { #expect(EmulatorPreference.order(for: gameBoy) == [.retroarch, .skyemu]) }
+    #expect(EmulatorPreference.order(for: 3) == [.retroarch])
+}
+
+@Test func ps2RunsOnRetroArchWithoutPCSX2() {
+    let root = tempDir()
+    touch(root, "ps2/game.iso")
+    let item = Scanner(installed: installed(cores: ["pcsx2"]), hasher: PathHasher(byFile: [:]))
+        .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:]).first
+    #expect(item?.emulator == .retroarch && item?.status == .ready)
+}

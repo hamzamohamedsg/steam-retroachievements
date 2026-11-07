@@ -174,8 +174,7 @@ public final class BridgeHandler: BridgeHandling {
             case .noEmulator(let hint): ("noEmulator", hint)
             case .chooseConsole: ("chooseConsole", "Choose a console")
             }
-            var choices = item.consoleId.map(EmulatorPreference.order(for:)) ?? []
-            if item.consoleId != nil, !choices.contains(.retroarch) { choices.append(.retroarch) }
+            let choices = item.consoleId.map(EmulatorPreference.order(for:)) ?? []
             return ScanRow(id: item.romPath, title: item.title, folder: (item.romPath as NSString).deletingLastPathComponent, status: status, statusText: text,
                            consoleId: item.consoleId, consoleName: item.consoleId.flatMap(Consoles.byID)?.name, emulator: item.emulator?.rawValue,
                            emulatorChoices: choices.filter { installed.emulators[$0] != nil }.map { Choice(id: $0.rawValue, name: $0.displayName) },

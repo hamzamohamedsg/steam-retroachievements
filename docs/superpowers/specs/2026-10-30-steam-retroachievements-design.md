@@ -188,11 +188,12 @@ Shortcuts that launch none of the supported emulators, and real Steam games, are
   - If a console has no installed core, skip those games and name the core to download in RetroArch's Online Updater.
 - Emulator per console: the window has an Emulator column. It defaults to the first installed emulator in this order (my call):
   - PlayStation: DuckStation, then RetroArch.
-  - PlayStation 2: PCSX2.
+  - PlayStation 2: PCSX2, then RetroArch.
   - PSP: PPSSPP, then RetroArch.
-  - GameCube and Wii: Dolphin.
+  - GameCube and Wii: Dolphin, then RetroArch.
   - Dreamcast: Flycast, then RetroArch.
   - Game Boy, Game Boy Color, and Game Boy Advance: RetroArch, then SkyEmu.
+  - Arcade: RetroArch, then Flycast.
   - Everything else: RetroArch.
 - The window lists what it found (game, console, core, status) with checkboxes and an "Add N Games to Steam" button. It skips ROMs already in the library (same ROM path).
 - Add shortcuts live through `SteamClient`. The name is the file name with tags cleaned, the launch options are `-L "<core>" "<rom>"`, and there's no artwork.

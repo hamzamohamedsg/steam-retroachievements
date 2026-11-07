@@ -129,18 +129,12 @@ public struct ShortcutSpec: Encodable, Equatable, Sendable {
     public var name, exe, launchOptions, startDir, bundle: String
 }
 
-/// Default emulator per console, in preference order (spec "Adding games").
+/// Every emulator that can run a console, default first (spec "Adding games").
 public enum EmulatorPreference {
     public static func order(for consoleId: Int) -> [Emulator] {
-        switch consoleId {
-        case 12: [.duckstation, .retroarch]
-        case 21: [.pcsx2]
-        case 41: [.ppsspp, .retroarch]
-        case 16, 19: [.dolphin]
-        case 40: [.flycast, .retroarch]
-        case 4, 5, 6: [.retroarch, .skyemu]
-        default: [.retroarch]
-        }
+        let standalone = Emulator.allCases.filter { $0.consoles.contains(consoleId) }
+        // shortcut: Flycast is offered for all arcade games but only runs Naomi and Atomiswave; tell them apart by folder if that bites
+        return [4, 5, 6, 27].contains(consoleId) ? [.retroarch] + standalone : standalone + [.retroarch]
     }
 }
 
@@ -173,10 +167,11 @@ public struct Scanner: Sendable {
                 }
                 return item(path, title, consoleId, e, nil, existingRomPaths)
             }
-            let first = prefs.first ?? .retroarch
-            let hint = first == .retroarch
-                ? "In RetroArch, open Online Updater → Core Downloader and get \(console?.cores.first ?? "a core for this console")."
-                : "Install \(first.displayName)."
+            // Anything installed here is RetroArch without the core: another emulator would have been picked above.
+            let missing = prefs.filter { installed.emulators[$0] == nil }
+            let install = missing.map(\.displayName).joined(separator: " or ")
+            let getCore = "In RetroArch, open Online Updater → Core Downloader and get \(console?.cores.first ?? "a core for this console")"
+            let hint = missing.count == prefs.count ? "Install \(install)." : missing.isEmpty ? "\(getCore)." : "\(getCore), or install \(install)."
             return ScanItem(romPath: path, title: title, consoleId: consoleId, emulator: nil, coreFile: nil, status: .noEmulator(hint))
         }
     }

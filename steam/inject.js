@@ -846,8 +846,9 @@
       const consoleCell = it.status === "chooseConsole"
         ? select([["", "Choose console…"], ...consoles.map((c) => [String(c.id), c.name])], "", (v) => { st.consoleOverrides[it.folder] = Number(v); scan(); })
         : el(doc, "div", { class: "sra-row-side" }, it.consoleName ?? "");
-      const emulatorCell = it.emulator && it.emulatorChoices.length > 1
-        ? select(it.emulatorChoices.map((c) => [c.id, c.name]), it.emulator, (v) => { st.emulatorOverrides[String(it.consoleId)] = v; scan(); })
+      // Stays up when the picked emulator can't run the game (RetroArch without the core), so the other one is still a click away.
+      const emulatorCell = it.emulatorChoices.length > 1
+        ? select(it.emulatorChoices.map((c) => [c.id, c.name]), it.emulator ?? st.emulatorOverrides[String(it.consoleId)], (v) => { st.emulatorOverrides[String(it.consoleId)] = v; scan(); })
         : el(doc, "div", { class: "sra-row-side" }, it.emulatorChoices.find((c) => c.id === it.emulator)?.name ?? "");
       return el(doc, "div", { class: "sra-row" }, box,
         el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, it.title), el(doc, "div", { class: "sra-muted" }, it.statusText)),
