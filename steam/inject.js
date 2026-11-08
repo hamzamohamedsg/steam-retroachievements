@@ -96,18 +96,25 @@
     // The store behind Steam's own achievements views (the overlay's Achievements window), found by the map only it has (Q16).
     achStore: undefined,
     achievementStore: () => {
-      if (steamUI.achStore === undefined) {
-        let req;
-        webpackChunksteamui.push([[Math.random()], {}, (r) => { req = r; }]);
-        steamUI.achStore = null;
-        for (const id of Object.keys(req.m)) {
-          let ex;
-          try { ex = req(id); } catch (_) { continue; }
-          const store = ex && typeof ex === "object" && Object.values(ex).find((v) => v && typeof v === "object" && "m_mapMyAchievements" in v);
-          if (store) { steamUI.achStore = store; break; }
-        }
-      }
+      if (steamUI.achStore === undefined) steamUI.achStore = steamUI.findExport((v) => v && typeof v === "object" && "m_mapMyAchievements" in v);
       return steamUI.achStore;
+    },
+    // Steam's MobX `observable` (export names change per build; its shape doesn't).
+    mobxObservable: undefined,
+    observable: () => {
+      if (steamUI.mobxObservable === undefined) steamUI.mobxObservable = steamUI.findExport((v) => typeof v === "function" && v.box && v.map && v.array);
+      return steamUI.mobxObservable;
+    },
+    findExport: (test) => {
+      let req;
+      webpackChunksteamui.push([[Math.random()], {}, (r) => { req = r; }]);
+      for (const id of Object.keys(req.m)) {
+        let ex;
+        try { ex = req(id); } catch (_) { continue; }
+        const hit = ex && typeof ex === "object" && Object.values(ex).find(test);
+        if (hit) return hit;
+      }
+      return null;
     },
     panelHost: (doc, bpm) => steamUI.findClass(doc, bpm ? "AppDetailsContent" : "RightColumn"),
     addGameButton: (doc) => steamUI.findClass(doc, "AddGameButton"),
@@ -199,6 +206,8 @@
   img[src$="#hardcore"] { outline: 2px solid #e5b143; outline-offset: -2px; }
   .sra-sets { display: flex; align-items: center; gap: 12px; height: 100%; }
   .sra-sets .sra-carousel { display: flex; gap: 8px; }
+  /* Steam's own menu classes draw the rest; it sits inside the tab, so it has to cover the window itself. */
+  .sra-menu[data-sra] { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.7); }
   .sra-set { background: none; border: 0; padding: 0; cursor: pointer; opacity: 0.45; } .sra-set:hover, .sra-set.sra-shown { opacity: 1; }
   .sra-set img { display: block; width: 36px; height: 36px; border-radius: 2px; }
   `;
@@ -274,12 +283,16 @@
   const BTN = { OK: 1, CANCEL: 2, SECONDARY: 3, BUMPER_LEFT: 5, BUMPER_RIGHT: 6, DIR_UP: 9, DIR_DOWN: 10, DIR_LEFT: 11, DIR_RIGHT: 12 };  // Steam's gamepad buttons
   const handled = (e) => { e.stopPropagation(); e.preventDefault(); };  // how Steam's own handlers claim a button
   // Each .sra-carousel is a row (left/right) and each .sra-column a column (up/down) of .sra-item; returns the items' nodes in order.
+  const navNodeFor = (doc, root) => {
+    const context = FocusNavController.m_rgAllContexts.find((x) => x.m_rootWindow === doc.defaultView);
+    const deepest = (node) => node.m_rgChildren.reduce((best, ch) => deepest(ch) ?? best, node.m_element?.contains(root) ? node : null);
+    let parent = null;
+    for (const tree of context?.m_rgGamepadNavigationTrees ?? []) parent = deepest(tree.m_Root) ?? parent;
+    return parent;
+  };
   const registerNav = (doc, root, cleanups = navCleanups, actions = { [BTN.OK]: "View My Achievements" }) => {
     try {
-      const context = FocusNavController.m_rgAllContexts.find((x) => x.m_rootWindow === doc.defaultView);
-      const deepest = (node) => node.m_rgChildren.reduce((best, ch) => deepest(ch) ?? best, node.m_element?.contains(root) ? node : null);
-      let parent = null;
-      for (const tree of context?.m_rgGamepadNavigationTrees ?? []) parent = deepest(tree.m_Root) ?? parent;
+      const parent = navNodeFor(doc, root);
       if (!parent) return [];
       const add = (under, element, props) => {
         const node = under.Tree.CreateNode(under, undefined);
@@ -1029,6 +1042,79 @@
   const playtimeInterval = setInterval(() => syncPlaytimes(), 3600000);
   let playtimesSynced = false;
 
+  // ---------------------------------------------------------------- All Games in Big Picture (docs/steam-internals.md Q19)
+  // Big Picture leaves every shortcut out of All Games. X on its Non-Steam tab opens a menu that puts the matched ones back.
+  const ALL_GAMES_KEY = "sra-show-in-all-games";
+  let showInAllGames = localStorage.getItem(ALL_GAMES_KEY) === "1";
+  let allGames = null;  // the hook: what to put back on dispose, and `extra`, an observable list so Steam redraws All Games when it changes
+  const syncAllGames = () => {
+    if (!allGames && !hookAllGames()) return;
+    const want = showInAllGames ? [...progress].filter(([, r]) => r.total > 0).map(([id]) => id) : [];
+    if (want.join() !== allGames.extra.get().join()) allGames.extra.set(want);
+  };
+  const hookAllGames = () => {
+    const admin = Object.getOwnPropertySymbols(collectionStore).find((s) => s.description === "mobx administration");
+    const computed = collectionStore[admin]?.values_?.get("allGamesCollection"), observable = steamUI.observable();
+    let proto = Object.getPrototypeOf(appStore.m_mapApps.values().next().value ?? {});
+    while (proto && !Object.prototype.hasOwnProperty.call(proto, "BIsShortcut")) proto = Object.getPrototypeOf(proto);
+    if (!computed?.derivation || !observable || !proto) return false;
+    const derivation = computed.derivation.sraOriginal ?? computed.derivation, isShortcut = proto.BIsShortcut.sraOriginal ?? proto.BIsShortcut;
+    const extra = observable.box([], { deep: false });
+    // Steam builds All Games by dropping whatever BIsShortcut() says; only during that build, the listed games aren't shortcuts.
+    // Nothing may be written to Steam's stores in here: this runs inside a MobX computed.
+    let letThrough = null;
+    proto.BIsShortcut = function () { return letThrough?.includes(this.appid) ? false : isShortcut.call(this); };
+    proto.BIsShortcut.sraOriginal = isShortcut;
+    computed.derivation = function () {
+      letThrough = extra.get();
+      try { return derivation.call(this); } finally { letThrough = null; }
+    };
+    computed.derivation.sraOriginal = derivation;
+    allGames = { computed, derivation, proto, isShortcut, extra };
+    computed.trackAndCompute();  // Steam built the list before this hook: this run makes it depend on `extra`
+    return true;
+  };
+  const openNonSteamMenu = (doc, host) => {
+    closeOverlay?.();
+    ensureStyle(doc);
+    const M = steamUI.classes("BasicContextMenuModal", "BasicContextMenuContainer", "contextMenuItem"), nav = [];
+    const label = () => `Show in All Games: ${showInAllGames ? "On" : "Off"}`;
+    const item = el(doc, "div", { class: `${c(M, "contextMenuItem", "Focused")} contextMenuItem Panel sra-item`, role: "menuitemcheckbox", "aria-checked": String(showInAllGames), tabindex: "0",
+      onclick: () => {
+        showInAllGames = !showInAllGames;
+        localStorage.setItem(ALL_GAMES_KEY, showInAllGames ? "1" : "0");
+        item.textContent = label();
+        item.setAttribute("aria-checked", String(showInAllGames));
+        syncAllGames();
+      } }, label());
+    const node = el(doc, "div", { class: `BasicUIContextMenu ${c(M, "BasicContextMenuModal")} sra-menu`, onclick: (e) => { if (e.target === node) close(); } },
+      el(doc, "div", { class: `${c(M, "BasicContextMenuContainer")} Panel` },
+        el(doc, "div", { class: `${c(M, "contextMenuContents")} Panel sra-column`, role: "menu", "aria-label": "RetroAchievements" }, item)));
+    const close = () => { nav.reverse().forEach((fn) => { try { fn(); } catch (_) {} }); node.remove(); closeOverlay = null; takeFocus(navNodeFor(doc, host)); };
+    // Only A reaches the item; everything else stays in the menu, and B closes it.
+    node.addEventListener("vgp_onbuttondown", safe((e) => { if (e.detail?.button === BTN.OK) return; handled(e); if (e.detail?.button === BTN.CANCEL) close(); }));
+    host.append(node);
+    closeOverlay = close;
+    takeFocus(registerNav(doc, node, nav, { [BTN.OK]: "Toggle", [BTN.CANCEL]: "Close", [BTN.SECONDARY]: null })[0]);
+  };
+  let optionsDoc = null;
+  const onLibraryPad = safe((e) => {
+    if (e.detail?.button !== BTN.SECONDARY) return;
+    const doc = e.currentTarget, host = steamUI.findClass(doc, "DesktopApps");
+    if (host?.contains(e.target) && !e.target.closest(".sra-menu")) { handled(e); openNonSteamMenu(doc, host); }
+  });
+  const ensureNonSteamOptions = (doc) => {
+    if (!allGames) return;
+    if (optionsDoc !== doc) {
+      optionsDoc?.removeEventListener("vgp_onbuttondown", onLibraryPad, true);
+      doc.addEventListener("vgp_onbuttondown", onLibraryPad, true);  // capture: Steam's grid stops the event before it reaches the document
+      optionsDoc = doc;
+    }
+    const host = steamUI.findClass(doc, "DesktopApps"), hostNode = host && navNodeFor(doc, host), map = hostNode?.m_Properties?.actionDescriptionMap;
+    // Steam's footer reads this up the focus tree; a redraw of the tab clears it, so each tick checks.
+    if (hostNode && !map?.[BTN.SECONDARY]) hostNode.SetProperties({ ...hostNode.m_Properties, actionDescriptionMap: { ...map, [BTN.SECONDARY]: "RetroAchievements" } });
+  };
+
   // ---------------------------------------------------------------- navigation
   const load = safe(async (appid, method) => {
     const shortcut = await steamUI.shortcut(appid);
@@ -1059,6 +1145,7 @@
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     steamAchievements.forEach((_, id) => applyDetails(id));
     progress.forEach((_, id) => applyProgress(id));  // Steam's own reply can land after ours
+    syncAllGames();
     // A shortcut's in-game overlay: its game's achievements when the game starts, fresh ones each time the overlay opens.
     const overlayWindows = SteamUIStore.WindowStore?.OverlayWindows ?? [];
     if (overlayWindows.length) overlayDocs().forEach(ensureStyle);  // the hardcore frame, in the overlay and the windows it opens
@@ -1083,7 +1170,7 @@
     const surface = steamUI.surface();
     if (!surface) return;
     const doc = surface.doc;
-    if (!surface.bpm) ensureLibraryButtons(doc);
+    surface.bpm ? ensureNonSteamOptions(doc) : ensureLibraryButtons(doc);
     const appid = steamUI.appid(surface);
     // A shortcut's overview can load after its page opens (Steam just started, or the game was just added).
     if (appid !== lastAppid || doc !== lastDoc || (!current && appid && steamUI.isShortcut(appid))) {
@@ -1185,6 +1272,8 @@
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
       for (const id of steamAchievements.keys()) feedSteam(id, null);
       for (const id of progress.keys()) forgetProgress(id);
+      optionsDoc?.removeEventListener("vgp_onbuttondown", onLibraryPad, true);
+      if (allGames) { allGames.extra.set([]); allGames.computed.derivation = allGames.derivation; allGames.proto.BIsShortcut = allGames.isShortcut; }
       overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra], .sra-sets").forEach((n) => {
         n.sraCleanups?.forEach((fn) => { try { fn(); } catch (_) {} });
         n.remove();

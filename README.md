@@ -36,7 +36,7 @@ You play your retro games through Steam, but their achievements live on a websit
 
 ## ⚡ Features
 
-- **Achievements on the game page**: your progress bar, your latest unlock, and rows of unlocked and locked icons with hover cards. Unlock every achievement in a set and it gets Steam's perfect-game ribbon, on the game page, the achievements page and in the overlay. Sort the library by achievements and your games show their % complete and sort with the rest, ribbon included. An **Achievements** stat sits in the play bar next to Play.
+- **Achievements on the game page**: your progress bar, your latest unlock, and rows of unlocked and locked icons with hover cards. Unlock every achievement in a set and it gets Steam's perfect-game ribbon, on the game page, the achievements page and in the overlay. Sort the library by achievements and your games show their % complete and sort with the rest, ribbon included. Big Picture keeps non-Steam games out of **All Games**; press **X** on its **Non-Steam** tab to show your RetroAchievements games there too. An **Achievements** stat sits in the play bar next to Play.
 - **Achievements page**: **View My Achievements** opens Steam's achievements page with unlock dates, rarity, My and Global tabs, and search.
 - **Activity feed**: your unlocks grouped by day ("you achieved…"), like a Steam game's.
 - **Game details behind the (i) button**: box art, console, developer, publisher, genre and points.
