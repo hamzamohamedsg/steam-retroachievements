@@ -49,7 +49,8 @@ struct EchoHandler: BridgeHandling {
 
 @Test func playtimesForPlayedShortcuts() async throws {
     let data = tempDir()
-    var p = progress([ach(1, order: 1)])
+    // One softcore unlock and one hardcore: both count, like the panel's summary.
+    var p = progress([ach(1, order: 1, earned: Date()), ach(2, order: 2, hardcore: Date()), ach(3, order: 3)])
     p.userTotalPlaytime = 3_700
     let progressJSON = try RADate.encoder.encode(p)
     let played = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 86_400).rounded(.down))  // yesterday, in the last two weeks
@@ -61,15 +62,16 @@ struct EchoHandler: BridgeHandling {
     let zelda = RAGameListEntry(id: 1447, title: "Zelda", consoleId: 7, consoleName: "NES/Famicom", imageIcon: "/i.png", numAchievements: 9, hashes: [])
     DiskCache(directory: data.appendingPathComponent("cache")).put("gamelist-7", [smbEntry, zelda])
     let handler = BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
-    // Zelda matches but was never played, so it gets nothing, like a Steam game with no playtime.
+    // Zelda matches but was never played: no playtime, like a Steam game, but its achievement counts still reach Steam's tiles.
     let unplayed = ShortcutInfo(appid: 2, name: "Zelda", exe: raExe, launchOptions: "-L \"/c/fceumm_libretro.dylib\" \"/r/nes/Zelda.nes\"")
     let params = try JSONEncoder().encode(["shortcuts": [smb(), unplayed]])
     let rows = { () async throws -> [[String: Int]]? in
         try JSONSerialization.jsonObject(with: try await handler.handle(method: "playtimes", params: params)) as? [[String: Int]]
     }
     // A first sync has no earlier total to compare with, so the whole total counts as the last two weeks.
-    #expect(try await rows() == [["appid": 1, "minutes": 62, "lastPlayed": Int(played.timeIntervalSince1970), "twoWeeks": 62]])
-    // The progress saved just now is newer than the last play, so the next sync doesn't fetch it again.
+    #expect(try await rows() == [["appid": 1, "minutes": 62, "lastPlayed": Int(played.timeIntervalSince1970), "twoWeeks": 62, "unlocked": 2, "total": 3],
+                                 ["appid": 2, "minutes": 0, "lastPlayed": 0, "twoWeeks": 0, "unlocked": 2, "total": 3]])
+    // The progress saved just now is newer than the last play (and Zelda has no play at all), so the next sync doesn't fetch it again.
     let progressCalls = { transport.urls.filter { $0.path.hasSuffix("UserProgress.php") }.count }
     let before = progressCalls()
     _ = try await rows()

@@ -907,6 +907,19 @@
       data.details = { ...d, nPlaytimeForever: minutes, rtLastTimePlayed: last, achievements: a ?? d.achievements };
     }
   };
+  // RA's counts go into Steam's own per-game cache, which the library's Achievements sort and tiles read (docs/steam-internals.md Q18).
+  const progress = new Map();  // appid → { unlocked, total } (the main set)
+  const progressCache = () => window.appAchievementProgressCache?.m_achievementProgress?.mapCache;  // absent until Steam's first reply: the next tick fills it
+  const applyProgress = (appid) => {
+    const r = progress.get(appid), cache = progressCache(), e = cache?.get(appid), last = appStore.GetAppOverviewByAppID(appid)?.rt_last_time_played ?? 0;
+    // Steam asks its servers again (they answer 0 for a shortcut) once the last play is newer than cache_time: a tick puts this back.
+    if (!r || !cache || (e?.unlocked === r.unlocked && e?.total === r.total && e.cache_time >= last)) return;
+    cache.set(appid, { appid, unlocked: r.unlocked, total: r.total, percentage: r.total ? r.unlocked * 100 / r.total : 0,
+      all_unlocked: r.total > 0 && r.unlocked === r.total, cache_time: Math.max(last, Math.floor(Date.now() / 1000)), vetted: true });
+  };
+  const setProgress = (appid, r) => { progress.set(appid, { unlocked: r.unlocked, total: r.total }); applyProgress(appid); };
+  // Steam answers for the shortcut itself again.
+  const forgetProgress = (appid) => { progress.delete(appid); progressCache()?.delete(appid); };
   // A matched game's achievements go into Steam's own stores too, so the in-game overlay draws them like a Steam game's:
   // the toolbar's Achievements button and window, and recent unlocks in Game Overview (docs/steam-internals.md Q16).
   const steamAchievements = new Map();  // appid → details.achievements (the main set)
@@ -938,6 +951,7 @@
     const [achieved, unachieved] = split(main);
     steamAchievements.set(appid, { nTotal: main.length, nAchieved: achieved.length, vecHighlight: achieved, vecUnachieved: unachieved, vecAchievedHidden: [] });
     applyDetails(appid);
+    setProgress(appid, { unlocked: achieved.length, total: main.length });
   };
   // The game's icon and each subset's (Bonus, Time Attack…), left of the window's Search: one switches the list to its set.
   // Click or Enter; A on a controller in Game Mode.
@@ -1008,6 +1022,7 @@
       playtimes.set(r.appid, r);
       applyOverview(appStore.GetAppOverviewByAppID(r.appid));
       applyDetails(r.appid);
+      r.total === undefined ? forgetProgress(r.appid) : setProgress(r.appid, r);
     }
   });
   // shortcut: a game played on another device shows up at the next hourly sync
@@ -1043,6 +1058,7 @@
     if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; syncPlaytimes(); }
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     steamAchievements.forEach((_, id) => applyDetails(id));
+    progress.forEach((_, id) => applyProgress(id));  // Steam's own reply can land after ours
     // A shortcut's in-game overlay: its game's achievements when the game starts, fresh ones each time the overlay opens.
     const overlayWindows = SteamUIStore.WindowStore?.OverlayWindows ?? [];
     if (overlayWindows.length) overlayDocs().forEach(ensureStyle);  // the hardcore frame, in the overlay and the windows it opens
@@ -1168,6 +1184,7 @@
       clearInterval(unlockInterval);
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
       for (const id of steamAchievements.keys()) feedSteam(id, null);
+      for (const id of progress.keys()) forgetProgress(id);
       overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra], .sra-sets").forEach((n) => {
         n.sraCleanups?.forEach((fn) => { try { fn(); } catch (_) {} });
         n.remove();

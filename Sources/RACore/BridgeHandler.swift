@@ -78,8 +78,8 @@ public final class BridgeHandler: BridgeHandling {
     }
     struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
     struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
-    /// Steam's own units: whole minutes, and a Unix time.
-    struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks: Int }
+    /// Steam's own units: whole minutes, and a Unix time. `unlocked`/`total`: the main set, for Steam's library tiles.
+    struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks, unlocked, total: Int }
     /// `since`: when the game started, a Unix time.
     struct UnlocksParams: Decodable { var since: Double }
     struct Unlock: Encodable { var id: Int; var title, description, image: String; var date: Int }
@@ -184,8 +184,9 @@ public final class BridgeHandler: BridgeHandling {
 
     static let recentPages = 10
 
-    /// RA's playtime and last-played time for the shortcuts whose games the user has played, for Steam's Play Time and Last Played.
-    /// Progress is fetched only for games played since it was last saved.
+    /// RA's playtime and last-played time for the shortcuts whose games the user has played, for Steam's Play Time and Last Played,
+    /// and every matched shortcut's achievement counts, for its library tiles.
+    /// Progress is fetched only for games played since it was last saved, or never saved.
     private func playtimes(_ shortcuts: [ShortcutInfo], _ s: Services) async -> [Playtime] {
         var lastPlayed: [Int: Date] = [:]
         // shortcut: reads the 500 most recently played games; older ones keep Steam's own (empty) playtime
@@ -201,14 +202,21 @@ public final class BridgeHandler: BridgeHandling {
         }
         var out: [Playtime] = []
         for shortcut in shortcuts {
-            guard case let .matched(gameId, _, _)? = try? await s.matcher.resolve(shortcut), let played = lastPlayed[gameId] else { continue }
-            let cached = s.ra.cachedProgress(gameId: gameId)
-            var progress = cached.flatMap { $0.savedAt > played && $0.value.userTotalPlaytime != nil ? $0.value : nil }
-            if progress == nil { progress = (try? await s.ra.gameProgress(gameId: gameId)) ?? cached?.value }
-            guard let seconds = progress?.userTotalPlaytime else { continue }
-            let twoWeeks = s.playtimeHistory.lastTwoWeeks(gameId: gameId, total: seconds, lastPlayed: played)
-            out.append(Playtime(appid: shortcut.appid, minutes: (seconds + 59) / 60, lastPlayed: max(0, Int(played.timeIntervalSince1970)),
-                                twoWeeks: (twoWeeks + 59) / 60))
+            guard case let .matched(gameId, _, _)? = try? await s.matcher.resolve(shortcut) else { continue }
+            let played = lastPlayed[gameId], cached = s.ra.cachedProgress(gameId: gameId)
+            // Not played lately: nothing has been unlocked since it was saved.
+            var fetched = cached.flatMap { c in played.map { c.savedAt > $0 && c.value.userTotalPlaytime != nil } ?? true ? c.value : nil }
+            if fetched == nil { fetched = (try? await s.ra.gameProgress(gameId: gameId)) ?? cached?.value }
+            guard let progress = fetched else { continue }
+            let unlocked = progress.achievements.filter { $0.dateEarned != nil || $0.dateEarnedHardcore != nil }.count
+            var row = Playtime(appid: shortcut.appid, minutes: 0, lastPlayed: 0, twoWeeks: 0, unlocked: unlocked, total: progress.achievements.count)
+            if let played, let seconds = progress.userTotalPlaytime {
+                let twoWeeks = s.playtimeHistory.lastTwoWeeks(gameId: gameId, total: seconds, lastPlayed: played)
+                row.minutes = (seconds + 59) / 60
+                row.lastPlayed = max(0, Int(played.timeIntervalSince1970))
+                row.twoWeeks = (twoWeeks + 59) / 60
+            }
+            out.append(row)
         }
         actions.log("info", "playtime for \(out.count) of \(shortcuts.count) shortcuts (\(lastPlayed.count) games played)")
         return out
