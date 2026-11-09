@@ -18,15 +18,17 @@ public protocol Fingerprinting: Sendable {
 
 /// ROM fingerprints computed with RetroAchievements' own rcheevos library, the same code emulators use.
 public struct RomHasher: Fingerprinting {
-    static let unsupportedExtensions: Set<String> = ["7z"]
-    static let arcade = 27, msDos = 26
+    static let arcade = 27, msDos = 26, gameCube = 16
+    // The largest cartridge dump (DS) is 512 MiB; disc images in a .7z aren't hashable from memory anyway.
+    static let sevenZipLimit = 512 << 20
+    private static let sevenZipTables: Void = sevenzip_init()
 
     public init() {}
 
     public func fingerprint(romPath: String, consoleId: Int) -> HashResult {
         let romPath = Self.followPlaylist(romPath)
         if let problem = Self.precheck(romPath) { return problem }
-        return withIterator(romPath: romPath, consoleId: consoleId) { it in
+        return withIterator(romPath: romPath, consoleId: consoleId, failed: .unsupportedFormat) { it in
             var hash = [CChar](repeating: 0, count: 33)
             return rc_hash_generate(&hash, UInt32(consoleId), &it) != 0 ? .hash(Self.string(hash)) : .unsupportedFormat
         }
@@ -35,7 +37,7 @@ public struct RomHasher: Fingerprinting {
     public func allFingerprints(romPath: String) -> [ConsoleHash] {
         let romPath = Self.followPlaylist(romPath)
         if Self.precheck(romPath) != nil { return [] }
-        return withIterator(romPath: romPath, consoleId: nil) { it in
+        return withIterator(romPath: romPath, consoleId: nil, failed: []) { it in
             var results: [ConsoleHash] = []
             var hash = [CChar](repeating: 0, count: 33)
             while rc_hash_iterate(&hash, &it) != 0 {
@@ -66,7 +68,7 @@ public struct RomHasher: Fingerprinting {
         return absolute ? entry : url.deletingLastPathComponent().appendingPathComponent(entry).path
     }
 
-    /// Missing, unreadable and v1-unsupported files never reach rcheevos.
+    /// Missing and unreadable files never reach rcheevos.
     static func precheck(_ path: String) -> HashResult? {
         #if os(Windows)
         // The C runtime's open() reads the path in the ANSI code page, so a name like "Pokémon.nes" looks missing.
@@ -79,23 +81,34 @@ public struct RomHasher: Fingerprinting {
         }
         close(fd)
         #endif
-        return unsupportedExtensions.contains(URL(fileURLWithPath: path).pathExtension.lowercased()) ? .unsupportedFormat : nil
+        return nil
     }
 
-    /// Runs `body` with an iterator over the file, or over the first file inside a zip
-    /// (except arcade and MS-DOS, where rcheevos hashes the zip itself).
-    private func withIterator<T>(romPath: String, consoleId: Int?, _ body: (inout rc_hash_iterator_t) -> T) -> T {
+    /// Runs `body` with an iterator over the file, the first file inside a zip or 7z (except arcade and MS-DOS, where
+    /// rcheevos hashes the archive itself), or the disc inside a GameCube rvz. `failed` is the answer for unreadable contents.
+    private func withIterator<T>(romPath: String, consoleId: Int?, failed: T, _ body: (inout rc_hash_iterator_t) -> T) -> T {
         var it = rc_hash_iterator_t()
         defer { rc_hash_destroy_iterator(&it) }
-        let isZip = URL(fileURLWithPath: romPath).pathExtension.lowercased() == "zip"
-        if isZip, consoleId != Self.arcade, consoleId != Self.msDos, let (name, bytes) = Self.firstZipEntry(romPath) {
-            return bytes.withUnsafeBytes { buf in
-                rc_hash_initialize_iterator(&it, name, buf.bindMemory(to: UInt8.self).baseAddress, buf.count)
-                return body(&it)
+        let ext = URL(fileURLWithPath: romPath).pathExtension.lowercased()
+        if ext == "zip" || ext == "7z", consoleId != Self.arcade, consoleId != Self.msDos {
+            if let (name, bytes) = ext == "zip" ? Self.firstZipEntry(romPath) : Self.firstSevenZipEntry(romPath) {
+                return bytes.withUnsafeBytes { buf in
+                    rc_hash_initialize_iterator(&it, name, buf.bindMemory(to: UInt8.self).baseAddress, buf.count)
+                    return body(&it)
+                }
             }
+            if ext == "7z" { return failed }  // hashing the archive's own bytes would give a wrong hash
+        }
+        if ext == "rvz" {
+            guard consoleId == nil || consoleId == Self.gameCube else { return failed }
+            rc_hash_initialize_iterator(&it, romPath, nil, 0)
+            rvz_filereader_install(&it)
+            if consoleId == nil { withUnsafeMutableBytes(of: &it.consoles) { $0[0] = UInt8(Self.gameCube) } }
+            let result = body(&it)
+            return rvz_read_failed() != 0 ? failed : result
         }
         rc_hash_initialize_iterator(&it, romPath, nil, 0)
-        if URL(fileURLWithPath: romPath).pathExtension.lowercased() == "chd" { chd_cdreader_install(&it) }
+        if ext == "chd" { chd_cdreader_install(&it) }
         return body(&it)
     }
 
@@ -105,6 +118,16 @@ public struct RomHasher: Fingerprinting {
             .split(whereSeparator: \.isNewline).map(String.init).first(where: { !$0.hasSuffix("/") }),
               let bytes = unzip(extract: name, from: path) else { return nil }
         return (name, bytes)
+    }
+
+    // shortcut: decodes the whole solid block into memory, so a block over the limit is refused; upgrade to streaming if big sets need it
+    static func firstSevenZipEntry(_ path: String, limit: Int = sevenZipLimit) -> (String, Data)? {
+        _ = sevenZipTables
+        var name: UnsafeMutablePointer<UInt16>?, nameLength = 0, bytes: UnsafeMutablePointer<UInt8>?, size = 0
+        guard sevenzip_first_file(path, limit, &name, &nameLength, &bytes, &size) != 0, let name, let bytes else { return nil }
+        defer { free(name) }
+        return (String(decoding: UnsafeBufferPointer(start: name, count: nameLength), as: UTF16.self),
+                Data(bytesNoCopy: bytes, count: size, deallocator: .free))
     }
 
     // Windows has no unzip, but its built-in tar (bsdtar) reads zip files.

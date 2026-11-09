@@ -5,15 +5,15 @@ import Testing
 let utc = TimeZone(identifier: "UTC")!
 let enUS = Locale(identifier: "en_US")
 
-func ach(_ id: Int, order: Int, earned: Date? = nil, hardcore: Date? = nil, awarded: Int = 5) -> RAAchievement {
+func ach(_ id: Int, order: Int, earned: Date? = nil, hardcore: Date? = nil, awarded: Int = 5, type: String? = nil) -> RAAchievement {
     RAAchievement(id: id, title: "A\(id)", description: "D\(id)", points: 10, badgeName: "b\(id)", displayOrder: order,
-                  numAwarded: awarded, numAwardedHardcore: 0, dateEarned: earned, dateEarnedHardcore: hardcore)
+                  numAwarded: awarded, numAwardedHardcore: 0, dateEarned: earned, dateEarnedHardcore: hardcore, type: type)
 }
 
-func progress(_ achievements: [RAAchievement], players: Int = 10) -> RAGameProgress {
+func progress(_ achievements: [RAAchievement], players: Int = 10, award: String? = nil) -> RAGameProgress {
     RAGameProgress(id: 1446, title: "Super Mario Bros.", consoleId: 7, consoleName: "NES/Famicom", imageIcon: "/Images/1.png",
                    publisher: "Nintendo", developer: "", genre: nil, released: "1985-09-13 00:00:00",
-                   numDistinctPlayers: players, achievements: achievements)
+                   numDistinctPlayers: players, achievements: achievements, highestAwardKind: award)
 }
 
 func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
@@ -55,6 +55,19 @@ func build(_ p: RAGameProgress, _ v: Verification = .verified) -> PanelPayload {
     #expect(locked.unlockedDay == nil)
     #expect(unlocked.unlockedAt == 0 && locked.unlockedAt == nil)
     #expect(build(progress([ach(1, order: 1)], players: 0)).achievements[0].rarityText == nil)
+}
+
+@Test func awardText() {
+    let kinds: [(String?, String?)] = [("mastered", "Mastered"), ("completed", "Completed"), ("beaten-hardcore", "Beaten (Hardcore)"),
+                                       ("beaten-softcore", "Beaten"), (nil, nil), ("platinum", nil)]
+    for (kind, text) in kinds { #expect(build(progress([ach(1, order: 1)], award: kind)).summary?.awardText == text) }
+}
+
+@Test func missableTagOnlyOnLockedMissable() {
+    let at = Date(timeIntervalSince1970: 0)
+    let p = build(progress([ach(1, order: 1, type: "missable"), ach(2, order: 2, earned: at, type: "missable"), ach(3, order: 3, hardcore: at, type: "missable"),
+                            ach(4, order: 4, type: "progression"), ach(5, order: 5), ach(6, order: 6, type: "secret")]))
+    #expect(p.achievements.filter(\.missable).map(\.id) == [1])
 }
 
 @Test func noticesPerVerification() {

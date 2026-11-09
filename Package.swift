@@ -21,7 +21,15 @@ let package = Package(
             publicHeadersPath: "include/libchdr",
             cSettings: [.define("MINIZ_NO_ARCHIVE_APIS"), .define("MINIZ_NO_DEFLATE_APIS"), .define("MINIZ_NO_STDIO"), .define("MINIZ_NO_TIME")]
         ),
-        .target(name: "CHDReader", dependencies: ["rcheevos", "chdr"]),
+        // 7-Zip's C decoder from the LZMA SDK (public domain). Its LzmaDec doesn't clash with libchdr's, which is renamed.
+        .target(
+            name: "SevenZip",
+            path: "Vendor/lzma-sdk-26.06",
+            sources: ["C"],
+            publicHeadersPath: "C",
+            cSettings: [.define("Z7_PPMD_SUPPORT"), .define("Z7_EXTRACT_ONLY")]
+        ),
+        .target(name: "CHDReader", dependencies: ["rcheevos", "chdr", "SevenZip"]),
         .target(name: "RACore", dependencies: ["rcheevos", "CHDReader", "SteamBridge"]),
         .testTarget(name: "RACoreTests", dependencies: ["RACore"], resources: [.copy("Fixtures")]),
         .target(name: "SteamBridge", dependencies: [.target(name: "CWinHTTP", condition: .when(platforms: [.windows]))]),

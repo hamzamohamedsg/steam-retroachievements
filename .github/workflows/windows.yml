@@ -35,6 +35,12 @@ jobs:
         shell: pwsh
         run: swift test
 
+      - name: Embed SteamGridDB key
+        shell: bash
+        env:
+          STEAMGRIDDB_API_KEY: ${{ secrets.STEAMGRIDDB_API_KEY }}
+        run: bash scripts/embed-sgdb-key.sh
+
       - name: Build
         shell: pwsh
         run: |

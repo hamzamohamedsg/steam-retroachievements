@@ -26,13 +26,26 @@ public struct BridgeActions: Sendable {
     /// Returns the setting now in effect.
     public var setOpenAtLogin: @Sendable (Bool) async -> Bool
     public var uninstall: @Sendable () async -> Void
+    /// The newer version on GitHub, if there is one.
+    public var updateVersion: @Sendable () async -> String?
+    /// Takes no input, so the page can't choose what gets installed. nil when the new copy is starting, otherwise the error to show.
+    public var installUpdate: @Sendable () async -> String?
+    /// Takes no input, so the page can't choose what gets opened.
+    public var openLog: @Sendable () async -> Void
+    /// Copy Diagnostics only: whether signed in, and what to scrub.
+    public var credentials: @Sendable () async -> RACredentials?
+    public var steamState: @Sendable () async -> String
 
     public init(openURL: @escaping @Sendable (URL) async -> Void = { _ in }, log: @escaping @Sendable (String, String) -> Void = { _, _ in },
                 account: @escaping @Sendable () async -> (username: String?, openAtLogin: Bool) = { (nil, false) },
                 signIn: @escaping @Sendable (String, String) async -> String? = { _, _ in nil }, signOut: @escaping @Sendable () async -> Void = {},
-                setOpenAtLogin: @escaping @Sendable (Bool) async -> Bool = { $0 }, uninstall: @escaping @Sendable () async -> Void = {}) {
+                setOpenAtLogin: @escaping @Sendable (Bool) async -> Bool = { $0 }, uninstall: @escaping @Sendable () async -> Void = {},
+                updateVersion: @escaping @Sendable () async -> String? = { nil }, installUpdate: @escaping @Sendable () async -> String? = { nil },
+                openLog: @escaping @Sendable () async -> Void = {}, credentials: @escaping @Sendable () async -> RACredentials? = { nil },
+                steamState: @escaping @Sendable () async -> String = { "" }) {
         self.openURL = openURL; self.log = log; self.account = account; self.signIn = signIn; self.signOut = signOut
-        self.setOpenAtLogin = setOpenAtLogin; self.uninstall = uninstall
+        self.setOpenAtLogin = setOpenAtLogin; self.uninstall = uninstall; self.updateVersion = updateVersion; self.installUpdate = installUpdate
+        self.openLog = openLog; self.credentials = credentials; self.steamState = steamState
     }
 }
 
@@ -47,11 +60,15 @@ public final class BridgeHandler: BridgeHandling {
     let hasher: any Fingerprinting
     /// Holds the folder Add Games scanned last, so the next scan starts there.
     let folderFile: URL?
+    let artwork: SteamGridDB
+    let logFile: URL?
+    let home: String
 
     public init(services: @escaping @Sendable () async -> Services?, actions: BridgeActions, push: @escaping @Sendable (String) async -> Void,
-                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher(), folderFile: URL? = nil) {
+                installed: @escaping @Sendable () -> Installed = { .detect() }, hasher: any Fingerprinting = RomHasher(), folderFile: URL? = nil,
+                artwork: SteamGridDB = SteamGridDB(), logFile: URL? = nil, home: String = FileManager.default.homeDirectoryForCurrentUser.path) {
         self.services = services; self.actions = actions; self.push = push; self.installed = installed; self.hasher = hasher
-        self.folderFile = folderFile
+        self.folderFile = folderFile; self.artwork = artwork; self.logFile = logFile; self.home = home
     }
 
     struct ShortcutParams: Decodable { var shortcut: ShortcutInfo }
@@ -65,7 +82,7 @@ public final class BridgeHandler: BridgeHandling {
     struct SignInResult: Encodable { var error: String? }
     struct ToggleParams: Decodable { var on: Bool }
     struct EmulatorStatus: Encodable { var name: String; var installed: Bool }
-    struct SettingsResult: Encodable { var username: String?; var openAtLogin: Bool; var emulators: [EmulatorStatus] }
+    struct SettingsResult: Encodable { var username: String?; var openAtLogin: Bool; var emulators: [EmulatorStatus]; var updateVersion: String? }
     struct ShortcutLine: Decodable { var exe, launchOptions: String }
     /// Override keys are a folder path and a console id (as text: JSON object keys).
     struct ScanParams: Decodable { var folder: String?; var shortcuts: [ShortcutLine]; var consoleOverrides: [String: Int]; var emulatorOverrides: [String: Emulator] }
@@ -83,6 +100,9 @@ public final class BridgeHandler: BridgeHandling {
     /// `since`: when the game started, a Unix time.
     struct UnlocksParams: Decodable { var since: Double }
     struct Unlock: Encodable { var id: Int; var title, description, image: String; var date: Int }
+    struct ArtworkParams: Decodable { var title: String; var appid: UInt32 }
+    struct ArtworkResult: Encodable { var images: [ArtworkImage]; var iconPath: String? }
+    struct DiagnosticsParams: Decodable { var steamBuild: Int? }
 
     public func handle(method: String, params: Data) async throws -> Data {
         let d = JSONDecoder()
@@ -113,7 +133,8 @@ public final class BridgeHandler: BridgeHandling {
             let (username, openAtLogin) = await actions.account()
             let found = installed().emulators
             return try encode(SettingsResult(username: username, openAtLogin: openAtLogin,
-                                             emulators: Emulator.allCases.map { EmulatorStatus(name: $0.displayName, installed: found[$0] != nil) }))
+                                             emulators: Emulator.allCases.map { EmulatorStatus(name: $0.displayName, installed: found[$0] != nil) },
+                                             updateVersion: await actions.updateVersion()))
         case "signIn":
             let p = try d.decode(SignInParams.self, from: params)
             return try encode(SignInResult(error: await actions.signIn(p.username, p.apiKey)))
@@ -125,6 +146,8 @@ public final class BridgeHandler: BridgeHandling {
         case "uninstall":
             await actions.uninstall()
             return Data("null".utf8)
+        case "installUpdate":
+            return try encode(SignInResult(error: await actions.installUpdate()))
         case "scanGames":
             return try encode(scan(try d.decode(ScanParams.self, from: params)))
         case "playtimes":
@@ -140,6 +163,15 @@ public final class BridgeHandler: BridgeHandling {
                 Unlock(id: $0.achievementId, title: $0.title, description: $0.description,
                        image: "\(PanelBuilder.media)/Badge/\($0.badgeName).png", date: Int($0.date.timeIntervalSince1970))
             })
+        case "artwork":
+            let p = try d.decode(ArtworkParams.self, from: params)
+            let art = try await artwork.art(title: p.title)
+            return try encode(ArtworkResult(images: art.images, iconPath: art.icon.flatMap { saveIcon($0, appid: p.appid) }))
+        case "openLog":
+            await actions.openLog()
+            return Data("null".utf8)
+        case "diagnostics":
+            return try encode(await diagnostics(steamBuild: try d.decode(DiagnosticsParams.self, from: params).steamBuild))
         case "openURL":
             let p = try d.decode(URLParams.self, from: params)
             guard BridgeRouter.isAllowedExternalURL(p.url), let url = URL(string: p.url) else { throw BridgeError.urlNotAllowed }
@@ -151,6 +183,32 @@ public final class BridgeHandler: BridgeHandling {
     }
 
     enum BridgeError: Error { case unknownMethod(String), urlNotAllowed }
+
+    /// The whole text is scrubbed here, so the page never holds the raw log.
+    private func diagnostics(steamBuild: Int?) async -> String {
+        let credentials = await actions.credentials(), found = installed().emulators
+        let emulators = Emulator.allCases.filter { found[$0] != nil }.map(\.displayName)
+        let report = """
+        Steam RetroAchievements \(UpdateChecker.currentVersion)
+        OS: \(Diagnostics.operatingSystem)
+        Steam build: \(steamBuild.map(String.init) ?? "unknown")
+        Signed in: \(credentials == nil ? "no" : "yes")
+        Emulators detected: \(emulators.isEmpty ? "none" : emulators.joined(separator: ", "))
+        Steam connection: \(await actions.steamState())
+
+        Last \(Diagnostics.logLines) log lines:
+        \(Diagnostics.lastLines(of: logFile) ?? "No log file")
+        """
+        return Diagnostics.scrub(report, home: home, secrets: [credentials?.username, credentials?.apiKey, artwork.key].compactMap { $0 })
+    }
+
+    /// Steam reads a shortcut's icon from a file, so it has to stay on disk.
+    private func saveIcon(_ data: Data, appid: UInt32) -> String? {
+        guard let folder = folderFile?.deletingLastPathComponent().appendingPathComponent("icons") else { return nil }
+        let file = folder.appendingPathComponent("\(appid).png")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return (try? data.write(to: file, options: .atomic)) == nil ? nil : file.path
+    }
 
     private func scan(_ p: ScanParams) -> ScanResult {
         let installed = installed()

@@ -7,15 +7,21 @@ public enum UpdateChecker {
 
     /// The release page when a newer version than `current` is out, otherwise nil.
     public static func newerRelease(current: String = currentVersion, transport: HTTPTransport = URLSessionTransport()) async -> (version: String, page: URL)? {
-        let api = URL(string: "https://api.github.com/repos/hamzamohamedsg/steam-retroachievements/releases/latest")!
-        guard let (data, status) = try? await transport.get(api), status == 200,
-              let release = try? JSONDecoder().decode(Release.self, from: data),
+        guard let release = await latest(transport: transport),
               let page = URL(string: release.html_url), page.scheme == "https",
               isNewer(release.tag_name, than: current) else { return nil }
         return (release.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV")), page)
     }
 
-    struct Release: Decodable { let tag_name: String; let html_url: String }
+    static func latest(transport: HTTPTransport) async -> Release? {
+        let api = URL(string: "https://api.github.com/repos/hamzamohamedsg/steam-retroachievements/releases/latest")!
+        guard let (data, status) = try? await transport.get(api), status == 200 else { return nil }
+        return try? JSONDecoder().decode(Release.self, from: data)
+    }
+
+    // Asset fields are optional so an odd asset can't lose the update notice.
+    struct Asset: Decodable { let name: String?; let browser_download_url: String?; let digest: String? }
+    struct Release: Decodable { let tag_name: String; let html_url: String; let assets: [Asset]? }
 
     /// Compares dotted numbers ("v0.1.10" > "0.1.9"). A tag that isn't numbers counts as not newer.
     static func isNewer(_ tag: String, than current: String) -> Bool {

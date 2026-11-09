@@ -54,12 +54,6 @@ func chdIsHashed(name: String) throws {
     #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 12) == .unsupportedFormat)
 }
 
-@Test func sevenZipIsUnsupported() throws {
-    let url = tempDir().appendingPathComponent("x.7z")
-    try Data(count: 1024).write(to: url)
-    #expect(RomHasher().fingerprint(romPath: url.path, consoleId: 12) == .unsupportedFormat)
-}
-
 @Test func missingFileIsMissing() {
     #expect(RomHasher().fingerprint(romPath: tempDir().appendingPathComponent("nope.nes").path, consoleId: 7) == .unreadable(.missing))
 }
