@@ -5,6 +5,9 @@ import Foundation
 import Observation
 import RACore
 import SteamBridge
+#if os(Windows)
+import WinSDK
+#endif
 
 /// Everything the app does on every platform. Settings and Add Games are dialogs inside Steam (steam/inject.js).
 @MainActor @Observable final class AppModel {
@@ -201,9 +204,20 @@ import SteamBridge
             return runProcess("/usr/bin/env", ["systemctl", "--user", "--no-block", "restart", LoginItem.unit]).status == 0
         }
         #endif
+        #if os(Windows)
+        // Not Process: it hands the child every inheritable handle open here, and this child runs for good, holding them.
+        var si = STARTUPINFOW(), pi = PROCESS_INFORMATION()
+        si.cb = DWORD(MemoryLayout<STARTUPINFOW>.size)
+        let started = "\"\(executable)\"".withCString(encodedAs: UTF16.self) {
+            CreateProcessW(nil, UnsafeMutablePointer(mutating: $0), nil, nil, false, 0, nil, nil, &si, &pi)
+        }
+        if started { CloseHandle(pi.hProcess); CloseHandle(pi.hThread) }
+        return started
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         return (try? process.run()) != nil
+        #endif
         #endif
     }
 

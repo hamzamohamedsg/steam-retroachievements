@@ -40,12 +40,12 @@ public actor Matcher {
             // Older versions auto-matched some ROMs to a subset; move those to the base game, which shows the subsets anyway.
             if !record.manual, let id = try await baseId(record.gameId, consoleId: record.consoleId), id != record.gameId {
                 record.gameId = id
-                store.save(romPath: rom, record)
+                try? store.save(romPath: rom, record)
             }
             if record.hash != state.hash || record.size != state.size || record.modified != state.modified {
                 var updated = record
                 updated.hash = state.hash; updated.size = state.size; updated.modified = state.modified
-                store.save(romPath: rom, updated)
+                try? store.save(romPath: rom, updated)
             }
             return .matched(gameId: record.gameId, consoleId: record.consoleId,
                             verification: try await verification(state, gameId: record.gameId, consoleId: record.consoleId))
@@ -55,7 +55,7 @@ public actor Matcher {
             for console in state.consoles {
                 if let entry = try await ra.gameList(consoleId: console).first(where: { $0.hashes.contains(hash) }),
                    let id = try await baseId(entry.id, consoleId: console) {
-                    save(rom, id, console, manual: false, state)
+                    try? save(rom, id, console, manual: false, state)  // a lost automatic match is just found again
                     return .matched(gameId: id, consoleId: console, verification: .verified)
                 }
             }
@@ -65,7 +65,7 @@ public actor Matcher {
         for console in state.consoles {
             let hits = try await ra.gameList(consoleId: console).filter { keys.contains(Titles.key($0.title)) && Titles.subsetName($0.title) == nil }
             if let best = hits.min(by: { ($0.numAchievements == 0 ? 1 : 0, $0.id) < ($1.numAchievements == 0 ? 1 : 0, $1.id) }) {
-                save(rom, best.id, console, manual: false, state)
+                try? save(rom, best.id, console, manual: false, state)
                 return .matched(gameId: best.id, consoleId: console, verification: state.base)
             }
         }
@@ -76,7 +76,7 @@ public actor Matcher {
         guard let launch = EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) else { return .notEmulator }
         guard let rom = launch.romPath else { return .noRom }
         let state = romState(rom, launch)
-        save(rom, gameId, consoleId, manual: true, state)
+        try save(rom, gameId, consoleId, manual: true, state)
         return .matched(gameId: gameId, consoleId: consoleId, verification: try await verification(state, gameId: gameId, consoleId: consoleId))
     }
 
@@ -134,7 +134,7 @@ public actor Matcher {
         return list.first { Titles.subsetName($0.title) == nil && Titles.key($0.title) == key }?.id ?? gameId
     }
 
-    private func save(_ rom: String, _ gameId: Int, _ consoleId: Int, manual: Bool, _ state: RomState) {
-        store.save(romPath: rom, MatchRecord(gameId: gameId, consoleId: consoleId, manual: manual, hash: state.hash, size: state.size, modified: state.modified))
+    private func save(_ rom: String, _ gameId: Int, _ consoleId: Int, manual: Bool, _ state: RomState) throws {
+        try store.save(romPath: rom, MatchRecord(gameId: gameId, consoleId: consoleId, manual: manual, hash: state.hash, size: state.size, modified: state.modified))
     }
 }

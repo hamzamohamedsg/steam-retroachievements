@@ -40,11 +40,14 @@ public final class MatchStore: @unchecked Sendable {
         lock.withLock { records[Self.key(romPath)] }
     }
 
-    public func save(romPath: String, _ record: MatchRecord) {
-        lock.withLock {
-            records[Self.key(romPath)] = record
+    /// Throws when the file can't be written, and then remembers nothing: a choice must not look saved until the next start.
+    public func save(romPath: String, _ record: MatchRecord) throws {
+        try lock.withLock {
+            var next = records
+            next[Self.key(romPath)] = record
             try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? JSONEncoder().encode(records).write(to: file, options: .atomic)
+            try JSONEncoder().encode(next).write(to: file, options: .atomic)
+            records = next
         }
     }
 }

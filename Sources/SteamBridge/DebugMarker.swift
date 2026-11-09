@@ -52,20 +52,18 @@ public func runProcess(_ exe: String, _ args: [String]) -> (status: Int32, outpu
 }
 
 #if os(Windows)
-private let launchLock = NSLock()
-
 /// Foundation's Process gives a console program (tasklist, reg, tar) a console window of its own when the parent has none,
 /// as this windowless app hasn't: every Steam check flashed one. CREATE_NO_WINDOW runs it hidden.
 public func runProcessData(_ exe: String, _ args: [String], directory: URL? = nil) -> (status: Int32, output: Data) {
     var readEnd: HANDLE?, writeEnd: HANDLE?, pi = PROCESS_INFORMATION()
     let cwd = directory.map { $0.withUnsafeFileSystemRepresentation { String(cString: $0!) } }
-    let started: Bool = launchLock.withLock {
-        // Only the child's end is inheritable, and only while it starts: another launch must not inherit it and hold the pipe open.
+    let started: Bool = {
         guard CreatePipe(&readEnd, &writeEnd, nil, 0) else { return false }
         defer { CloseHandle(writeEnd) }
         SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
-        // And the child gets that end alone. By default it inherits every inheritable handle here, Foundation opens files
+        // The child gets that end alone. By default it inherits every inheritable handle here, Foundation opens files
         // inheritable, and a child holding an atomic write's temp file makes the rename fail (error 32), which callers `try?` away.
+        // The list also keeps another launch's child from holding this pipe open.
         var size: SIZE_T = 0
         InitializeProcThreadAttributeList(nil, 1, 0, &size)
         let memory = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: 16)
@@ -89,7 +87,7 @@ public func runProcessData(_ exe: String, _ args: [String], directory: URL? = ni
                 withWide(cwd) { CreateProcessW(nil, UnsafeMutablePointer(mutating: line), nil, nil, true, flags, nil, $0, startup, &pi) }
             }
         } }
-    }
+    }()
     defer { if let readEnd { CloseHandle(readEnd) } }
     guard started else { return (-1, Data()) }
     defer { CloseHandle(pi.hProcess); CloseHandle(pi.hThread) }

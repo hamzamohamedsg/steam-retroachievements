@@ -103,7 +103,7 @@ A shortcut with no ROM in its launch options just opens the emulator's menu, so 
 
 ## 🩺 When Something Looks Wrong
 
-- **"Couldn't check this ROM version":** the app couldn't fingerprint this file, so it matched the game by name. This happens with a Wii `.rvz`, a `.rvz` packed with bzip2, a `.chd` it can't read, and a `.7z` that is damaged, password-protected or over 512 MiB unpacked. Your emulator can still unlock achievements.
+- **"Couldn't check this ROM version":** the app couldn't fingerprint this file, so it matched the game by name. This happens with a Wii `.rvz`, a `.rvz` packed with bzip2, a `.chd` it can't read, and a `.zip` or `.7z` that is damaged, password-protected or over 512 MiB unpacked. Your emulator can still unlock achievements.
 - **"RetroAchievements doesn't recognize this ROM version":** this exact ROM isn't one RetroAchievements supports, so the emulator won't unlock achievements for it.
 - **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one (in Big Picture, press A on it) to open that subset's achievements page. Subsets are separate from the game's own list and totals.
 - **Wrong game:** in the desktop library, click the (i) button next to the heart, then **Wrong game?**, and pick the right one. The app remembers your choice.

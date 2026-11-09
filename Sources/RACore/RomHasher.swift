@@ -1,7 +1,6 @@
 import Foundation
 import rcheevos
 import CHDReader
-import SteamBridge
 
 public enum Unreadable: Equatable, Sendable { case missing, blocked }
 public enum HashResult: Equatable, Sendable { case hash(String), unsupportedFormat, unreadable(Unreadable) }
@@ -19,8 +18,8 @@ public protocol Fingerprinting: Sendable {
 /// ROM fingerprints computed with RetroAchievements' own rcheevos library, the same code emulators use.
 public struct RomHasher: Fingerprinting {
     static let arcade = 27, msDos = 26, gameCube = 16
-    // The largest cartridge dump (DS) is 512 MiB; disc images in a .7z aren't hashable from memory anyway.
-    static let sevenZipLimit = 512 << 20
+    // The largest cartridge dump (DS) is 512 MiB; disc images in a zip or 7z aren't hashable from memory anyway.
+    static let archiveLimit = 512 << 20
     private static let sevenZipTables: Void = sevenzip_init()
 
     public init() {}
@@ -113,36 +112,22 @@ public struct RomHasher: Fingerprinting {
     }
 
     // shortcut: hashes the first file in the zip; upgrade if multi-file zips show up
-    static func firstZipEntry(_ path: String) -> (String, Data)? {
-        guard let list = unzip(list: path), let name = String(data: list, encoding: .utf8)?
-            .split(whereSeparator: \.isNewline).map(String.init).first(where: { !$0.hasSuffix("/") }),
-              let bytes = unzip(extract: name, from: path) else { return nil }
-        return (name, bytes)
+    static func firstZipEntry(_ path: String, limit: Int = archiveLimit) -> (String, Data)? {
+        // Mapped, so only the first file's bytes are read; Foundation opens any Unicode path, which Windows' tar couldn't.
+        guard let zip = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else { return nil }
+        var name: UnsafeMutablePointer<CChar>?, bytes: UnsafeMutablePointer<UInt8>?, size = 0
+        guard zip.withUnsafeBytes({ zip_first_file($0.baseAddress, $0.count, limit, &name, &bytes, &size) }) != 0, let name, let bytes else { return nil }
+        defer { free(name) }
+        return (String(cString: name), Data(bytesNoCopy: bytes, count: size, deallocator: .free))
     }
 
     // shortcut: decodes the whole solid block into memory, so a block over the limit is refused; upgrade to streaming if big sets need it
-    static func firstSevenZipEntry(_ path: String, limit: Int = sevenZipLimit) -> (String, Data)? {
+    static func firstSevenZipEntry(_ path: String, limit: Int = archiveLimit) -> (String, Data)? {
         _ = sevenZipTables
         var name: UnsafeMutablePointer<UInt16>?, nameLength = 0, bytes: UnsafeMutablePointer<UInt8>?, size = 0
         guard sevenzip_first_file(path, limit, &name, &nameLength, &bytes, &size) != 0, let name, let bytes else { return nil }
         defer { free(name) }
         return (String(decoding: UnsafeBufferPointer(start: name, count: nameLength), as: UTF16.self),
                 Data(bytesNoCopy: bytes, count: size, deallocator: .free))
-    }
-
-    // Windows has no unzip, but its built-in tar (bsdtar) reads zip files.
-    #if os(Windows)
-    private static let unzipTool = "C:\\Windows\\System32\\tar.exe"
-    private static func unzip(list path: String) -> Data? { run(["-tf", path]) }
-    private static func unzip(extract name: String, from path: String) -> Data? { run(["-xOf", path, name]) }
-    #else
-    private static let unzipTool = "/usr/bin/unzip"
-    private static func unzip(list path: String) -> Data? { run(["-Z1", path]) }
-    private static func unzip(extract name: String, from path: String) -> Data? { run(["-p", path, name]) }
-    #endif
-
-    private static func run(_ args: [String]) -> Data? {
-        let (status, data) = runProcessData(unzipTool, args)  // on Windows without a console window flashing up
-        return status == 0 ? data : nil
     }
 }

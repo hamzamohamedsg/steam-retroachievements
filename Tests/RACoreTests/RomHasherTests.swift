@@ -13,6 +13,18 @@ import Testing
     #expect(RomHasher().fingerprint(romPath: dir.appendingPathComponent("game.zip").path, consoleId: 7) == .hash(md5(payload)))
 }
 
+// Windows' tar read paths in the ANSI code page, so a zip under a name like this one couldn't be opened.
+@Test func zipInAUnicodeFolderIsHashed() throws {
+    let dir = tempDir(), folder = tempDir().appendingPathComponent("ポケモン – Röms")
+    writeNES(dir)
+    #expect(zip("game.nes", into: "game.zip", in: dir) == 0)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let zipped = folder.appendingPathComponent("game.zip")
+    try FileManager.default.moveItem(at: dir.appendingPathComponent("game.zip"), to: zipped)
+    #expect(RomHasher().fingerprint(romPath: zipped.path, consoleId: 7) == .hash(md5(payload)))
+    #expect(RomHasher.firstZipEntry(zipped.path, limit: 1024) == nil)  // decodes to more than that
+}
+
 @Test func arcadeUsesFileName() throws {
     let url = tempDir().appendingPathComponent("sf2.zip")
     try Data([1, 2, 3]).write(to: url)

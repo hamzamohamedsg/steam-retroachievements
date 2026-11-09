@@ -781,7 +781,14 @@
       const hits = await call("searchGames", { consoleId: Number(select.value), query: input.value });
       if (mine !== seq) return;
       results.replaceChildren(...hits.map((g) => el(doc, "div", { class: "sra-row sra-pick", onclick: async () => {
-        const payload = await call("chooseGame", { shortcut, gameId: g.gameId, consoleId: Number(select.value) });
+        let payload;
+        try {
+          payload = await call("chooseGame", { shortcut, gameId: g.gameId, consoleId: Number(select.value) });
+        } catch (e) {
+          log("error", `chooseGame: ${e?.message ?? e}`);
+          results.replaceChildren(el(doc, "div", { class: "sra-error" }, "Couldn't save your choice. Try again."));
+          return;
+        }
         closeOverlay?.();
         if (current?.appid === appid) render(payload);
       } }, el(doc, "img", { src: g.iconURL, alt: "" }),
