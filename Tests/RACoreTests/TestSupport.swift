@@ -2,6 +2,7 @@
 import CryptoKit
 #endif
 import Foundation
+import SteamBridge
 
 func tempDir() -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("sra-\(UUID().uuidString)")
@@ -57,15 +58,10 @@ func writeNES(_ dir: URL, _ name: String = "game.nes") -> URL {
     return url
 }
 
+/// Through the app's launcher: on Windows, Foundation's Process lets the child inherit other tests' temp files and break their writes.
 @discardableResult
 func run(_ tool: String, _ args: [String], in dir: URL) -> Int32 {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: tool)
-    p.arguments = args
-    p.currentDirectoryURL = dir
-    guard (try? p.run()) != nil else { return -1 }
-    p.waitUntilExit()
-    return p.terminationStatus
+    runProcessData(tool, args, directory: dir).status
 }
 
 /// Zips `file` into `archive` inside `dir`; Windows has no zip, but its tar writes zip files.

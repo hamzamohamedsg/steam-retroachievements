@@ -2,6 +2,29 @@ import Foundation
 import Testing
 @testable import SteamBridge
 
+#if os(Windows)
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var value: Bool { lock.withLock { on } }
+    func set() { lock.withLock { on = true } }
+}
+
+// A child inherits every inheritable handle open while it starts. One on an atomic write's temp file makes the rename fail (error 32).
+@Test func launchesDontBreakAtomicWrites() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sra-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let stop = Flag()
+    defer { stop.set() }
+    Thread.detachNewThread { while !stop.value { runProcessData("C:\\Windows\\System32\\tar.exe", ["--version"]) } }
+    let failures = (0..<400).filter { (try? Data(count: 2048).write(to: dir.appendingPathComponent("f\($0 % 8)"), options: .atomic)) == nil }.count
+    #expect(failures == 0)
+    let (status, output) = runProcess("C:\\Windows\\System32\\tar.exe", ["--version"])  // launches still work, with their output
+    #expect(status == 0 && output.contains("bsdtar"))
+}
+#endif
+
 @Test func markerEnsureAndRemove() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sra-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
