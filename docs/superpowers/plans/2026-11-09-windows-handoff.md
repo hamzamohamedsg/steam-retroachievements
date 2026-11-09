@@ -10,8 +10,22 @@
 
 ## Get the code
 
-- **Branch:** check out `feat/app-gaps`. The **Windows build** workflow, run on that branch with an empty tag, produces a build that already contains the key: `gh workflow run windows.yml --ref feat/app-gaps`, then download the `steam-retroachievements-windows` artifact.
-- **Patch:** if the user copied over `windows-handoff.patch`, apply it to a clean tree at `70a31e0` or `2baf69d` (they differ only in README screenshots) with `git apply --whitespace=nowarn path\to\windows-handoff.patch`. If it fails on line endings, use a checkout made with `core.autocrlf=false`.
+The work is pushed to `feat/app-gaps` (the features are commit `7192cf6`, on top of `70a31e0`). `main` is unchanged and there's no pull request.
+
+```powershell
+git fetch origin
+git switch feat/app-gaps
+```
+
+For a build that already contains the SteamGridDB key, run the **Windows build** workflow on that branch and download the `steam-retroachievements-windows` artifact. This also runs the test suite on Windows, so check that job's result:
+
+```powershell
+gh workflow run windows.yml --ref feat/app-gaps
+gh run list --workflow windows.yml --branch feat/app-gaps --limit 1
+gh run download <run-id> --name steam-retroachievements-windows
+```
+
+The workflow has never run with these changes, so a failure there is a finding to report.
 
 If the build says `cannot find 'sevenzip_init' in scope`, delete the build folder and rebuild: stale module caches don't pick up the new C headers.
 
