@@ -17,7 +17,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshots/rom-page.png" alt="A ROM's page in Steam's library: the game's details open under the (i) button, the activity feed on the left, RetroAchievements progress on the right">
+  <img src="docs/screenshots/rom-page.png" alt="A ROM's page in Steam's library: the activity feed on the left, RetroAchievements progress on the right">
 </p>
 
 You play your retro games through Steam, but their achievements live on a website. Steam shows a dashed box saying it knows nothing about the game.
@@ -31,6 +31,10 @@ You play your retro games through Steam, but their achievements live on a websit
 | Achievements page | Add Games |
 |---|---|
 | ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
+
+| In-game menu: Achievements | In-game menu: Subsets |
+|---|---|
+| ![The in-game menu's Achievements page in Game Mode, with unlock dates and rarity](docs/screenshots/game-mode-achievements.png) | ![The same page switched to a subset's achievements with the icons next to Search](docs/screenshots/game-mode-subset.png) |
 
 ---
 
