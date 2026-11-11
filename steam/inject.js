@@ -851,7 +851,7 @@
           draw();
         } },
         el(doc, "label", {}, "Username", user), el(doc, "label", {}, "Web API key", key),
-        el(doc, "button", { class: "sra-link", type: "button", onclick: () => call("openURL", { url: "https://retroachievements.org/settings" }) }, "Find your Web API key"),
+        el(doc, "button", { class: "sra-link", type: "button", onclick: () => call("openURL", { url: "https://retroachievements.org/settings?tab=applications" }) }, "Find your Web API key"),
         error, el(doc, "div", { class: "sra-actions" }, submit)));
         setTimeout(() => user.focus(), 0);
       }
