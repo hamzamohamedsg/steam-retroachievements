@@ -28,6 +28,12 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Embed SteamGridDB key
+        shell: bash
+        env:
+          STEAMGRIDDB_API_KEY: ${{ secrets.STEAMGRIDDB_API_KEY }}
+        run: bash scripts/embed-sgdb-key.sh
+
       - name: Build
         run: swift build -c release --product SteamRetroAchievements
 

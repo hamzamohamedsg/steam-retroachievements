@@ -25,14 +25,21 @@ final class DevToolsSocket: @unchecked Sendable {
         let (messages, continuation) = AsyncStream.makeStream(of: String.self)
         self.messages = messages
         task.resume()
-        Self.receive(task, continuation)
+        Self.receive(task, maximumMessageSize, continuation)
     }
 
-    private static func receive(_ task: URLSessionWebSocketTask, _ continuation: AsyncStream<String>.Continuation) {
+    private static func receive(_ task: URLSessionWebSocketTask, _ limit: Int, _ continuation: AsyncStream<String>.Continuation) {
         task.receive { result in
             guard case .success(let message) = result else { return continuation.finish() }
-            if case .string(let text) = message { continuation.yield(text) }
-            receive(task, continuation)
+            if case .string(let text) = message {
+                // URLSession's maximumMessageSize isn't enforced on every macOS (28 delivers 200 KB past a 10 KB limit).
+                guard text.utf8.count <= limit else {
+                    task.cancel(with: .messageTooBig, reason: nil)
+                    return continuation.finish()
+                }
+                continuation.yield(text)
+            }
+            receive(task, limit, continuation)
         }
     }
 

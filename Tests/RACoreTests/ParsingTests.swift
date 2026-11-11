@@ -136,7 +136,7 @@ let raExe = "\"/Applications/RetroArch.app/Contents/MacOS/RetroArch\""
 @Test func matchStoreTreatsWindowsPathsAsOne() throws {
     let file = tempDir().appendingPathComponent("matches.json")
     let store = MatchStore(file: file)
-    store.save(romPath: "C:\\ROMs\\SNES\\Mario.sfc", MatchRecord(gameId: 1, consoleId: 3, manual: false, hash: "h", size: 1, modified: 2))
+    try store.save(romPath: "C:\\ROMs\\SNES\\Mario.sfc", MatchRecord(gameId: 1, consoleId: 3, manual: false, hash: "h", size: 1, modified: 2))
     #expect(store.record(romPath: "c:/roms/snes/mario.sfc")?.gameId == 1)
     #expect(MatchStore(file: file).record(romPath: "C:/ROMs/SNES/Mario.sfc")?.gameId == 1)
 }

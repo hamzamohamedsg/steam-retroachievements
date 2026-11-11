@@ -17,7 +17,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshots/rom-page.png" alt="A ROM's page in Steam's library: the game's details open under the (i) button, the activity feed on the left, RetroAchievements progress on the right">
+  <img src="docs/screenshots/rom-page.png" alt="A ROM's page in Steam's library: the activity feed on the left, RetroAchievements progress on the right">
 </p>
 
 You play your retro games through Steam, but their achievements live on a website. Steam shows a dashed box saying it knows nothing about the game.
@@ -32,11 +32,16 @@ You play your retro games through Steam, but their achievements live on a websit
 |---|---|
 | ![All of the game's achievements, with unlock dates and rarity](docs/screenshots/achievements.png) | ![The Add Games dialog listing ROMs found in ~/ROMs](docs/screenshots/add-games.png) |
 
+| In-game menu: Achievements | In-game menu: Subsets |
+|---|---|
+| ![The in-game menu's Achievements page in Game Mode, with unlock dates and rarity](docs/screenshots/game-mode-achievements.png) | ![The same page switched to a subset's achievements with the icons next to Search](docs/screenshots/game-mode-subset.png) |
+
 ---
 
 ## ⚡ Features
 
 - **Achievements on the game page**: your progress bar, your latest unlock, and rows of unlocked and locked icons with hover cards. Unlock every achievement in a set and it gets Steam's perfect-game ribbon, on the game page, the achievements page and in the overlay. Sort the library by achievements and your games show their % complete and sort with the rest, ribbon included. Big Picture keeps non-Steam games out of **All Games**; press **X** on its **Non-Steam** tab to show your RetroAchievements games there too. An **Achievements** stat sits in the play bar next to Play.
+- **Missable achievements and awards**: achievements you can permanently miss are marked **Missable** until you unlock them, and your award for the game (**Mastered**, **Completed**, **Beaten (Hardcore)** or **Beaten**) shows by your progress.
 - **Achievements page**: **View My Achievements** opens Steam's achievements page with unlock dates, rarity, My and Global tabs, and search.
 - **Activity feed**: your unlocks grouped by day ("you achieved…"), like a Steam game's.
 - **Game details behind the (i) button**: box art, console, developer, publisher, genre and points.
@@ -45,11 +50,11 @@ You play your retro games through Steam, but their achievements live on a websit
 - **Big Picture mode** with **full controller support**: the D-pad moves through the achievements like any Steam game, and **A** opens the achievements page.
 - **RetroAchievements pages one click away**: click an achievement to open its page on retroachievements.org. In Big Picture (Steam Deck too), press **X** (□ on PlayStation) on an achievement or subset, or **A** on a row of the achievements page; it opens in Steam's own browser.
 - **Subsets** (Bonus, Time Attack…) each get an icon that opens their own achievements page; click its title there to open the subset on RetroAchievements.
-- **Add Games**: scan a ROM folder, pick an emulator for each game, and add them all to Steam in one go.
+- **Add Games**: scan a ROM folder, pick an emulator for each game, and add them all to Steam in one go, with library artwork from SteamGridDB.
 - **Knows your exact ROM**: it fingerprints ROMs with RetroAchievements' own code and warns you when a version won't unlock achievements.
 - Works with **RetroArch**, **DuckStation** (PS1), **PCSX2** (PS2), **PPSSPP** (PSP), **Dolphin** (GameCube/Wii), **Flycast** (Dreamcast) and **SkyEmu** (Game Boy family).
 - **Stays out of the way**: a menu bar app on macOS, a tray icon on Windows, a background program on Linux. Signing in and adding games happen inside Steam.
-- **Update notices** when a new version is out.
+- **Updates** with one click: when a new version is out, click **Update Now** (macOS menu bar, Windows tray, or the **RetroAchievements** dialog in Steam). The download is checked against GitHub's fingerprint before anything is replaced, and your sign-in and data stay as they are. If it can't install where the app is, the release page opens instead.
 
 ---
 
@@ -60,7 +65,7 @@ You play your retro games through Steam, but their achievements live on a websit
    - **Windows:** unzip `steam-retroachievements-windows.zip` and run `SteamRetroAchievements.exe`. It shows a trophy in the notification area (the tray); click it to see the status or quit. Keep all the files in the folder together. If SmartScreen warns, choose **More info → Run anyway** (the program isn't signed).
    - **Linux** (Steam Deck, Bazzite and other distributions): unpack `steam-retroachievements-linux.tar.gz` and open `steam-retroachievements`, by double-clicking it or from a terminal. Keep `inject.js` and `icon.png` next to it. On a Steam Deck, do this in Desktop Mode. It runs in the background with no window. The first run also adds **Steam RetroAchievements** to your app menu, so after that you can start it from there. To update, unpack the new version and open it the same way; it replaces the running copy.
 2. **Restart Steam** if asked. Steam only reads the developer switch when it starts. On macOS, the menu bar shows **Restart Steam to finish setup** with a button. On Windows the tray menu says so, on Linux a notification; quit Steam and open it again yourself. On a Steam Deck, going back to Game Mode restarts Steam.
-3. When Steam connects, a **Steam RetroAchievements** dialog opens in Steam's library. Enter your RetroAchievements username and Web API key; the key is on [retroachievements.org/settings](https://retroachievements.org/settings). Click **Sign In**. Signing in also turns on **Open at login**: a login item on macOS, a systemd user service on Linux (it runs in Steam Deck's Game Mode too), a Run registry entry on Windows.
+3. When Steam connects, a **Steam RetroAchievements** dialog opens in Steam's library. Enter your RetroAchievements username and Web API key; the key is on [retroachievements.org/settings](https://retroachievements.org/settings?tab=applications). Click **Sign In**. Signing in also turns on **Open at login**: a login item on macOS, a systemd user service on Linux (it runs in Steam Deck's Game Mode too), a Run registry entry on Windows.
 4. **Sign in to RetroAchievements inside each emulator** you play with. The emulator is what unlocks achievements; this app only shows them.
 
 You can open the dialog again from the **RetroAchievements** button at the bottom of Steam's library, next to **Add a Game**.
@@ -98,12 +103,13 @@ A shortcut with no ROM in its launch options just opens the emulator's menu, so 
 
 ## 🩺 When Something Looks Wrong
 
-- **"Couldn't check this ROM version":** the app can't fingerprint `.7z` files (or `.rvz`, or a `.chd` it can't read) yet. It matched the game by name. Your emulator can still unlock achievements.
+- **"Couldn't check this ROM version":** the app couldn't fingerprint this file, so it matched the game by name. This happens with a Wii `.rvz`, a `.rvz` packed with bzip2, a `.chd` it can't read, and a `.zip` or `.7z` that is damaged, password-protected or over 512 MiB unpacked. Your emulator can still unlock achievements.
 - **"RetroAchievements doesn't recognize this ROM version":** this exact ROM isn't one RetroAchievements supports, so the emulator won't unlock achievements for it.
 - **Subsets:** when a game has RetroAchievements subsets (Bonus, Time Attack…), the achievements panel shows an icon for each under "Subsets". Click one (in Big Picture, press A on it) to open that subset's achievements page. Subsets are separate from the game's own list and totals.
 - **Wrong game:** in the desktop library, click the (i) button next to the heart, then **Wrong game?**, and pick the right one. The app remembers your choice.
 - **Panel gone after a Steam update:** restart Steam (macOS: **Restart Steam** in the menu bar). If it's still missing, Steam changed something inside and the app needs an update.
-- **Log file:** `~/Library/Logs/steam-retroachievements.log` on macOS, `~/.local/share/steam-retroachievements/steam-retroachievements.log` on Linux, `%LOCALAPPDATA%\steam-retroachievements\steam-retroachievements.log` on Windows.
+- **Log file:** `~/Library/Logs/steam-retroachievements.log` on macOS, `~/.local/share/steam-retroachievements/steam-retroachievements.log` on Linux, `%LOCALAPPDATA%\steam-retroachievements\steam-retroachievements.log` on Windows. **Open Log** in the **RetroAchievements** dialog opens it.
+- **Reporting a problem:** click **Copy Diagnostics** in the **RetroAchievements** dialog and paste the result into your report. It has the app, system and Steam versions, whether you're signed in, the emulators found and the last 100 log lines, with your username, keys, URL query strings and home folder removed.
 
 ---
 
@@ -128,7 +134,7 @@ On macOS it then moves the app to the Trash; on Linux and Windows, delete the pr
   - talks to the RetroAchievements API
   - keeps your Web API key: in the macOS Keychain, on Linux in a file only your user account can read, or on Windows encrypted with your Windows account (DPAPI), so other users and other PCs can't read it. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
 - The app opens no network ports and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
-- It goes online only to talk to RetroAchievements and to check GitHub for a newer release. No tracking, no analytics.
+- It goes online only to talk to RetroAchievements, to check GitHub for a newer release, and to fetch artwork from SteamGridDB for games you add (it sends their titles). No tracking, no analytics.
 
 ---
 
@@ -145,7 +151,7 @@ node scripts/steam-eval.mjs 'MainWindowBrowserManager.m_lastLocation'   # poke a
 
 `build-linux.sh` needs the swift.org toolchain from [swiftly](https://www.swift.org/install/macos/) and the matching Static Linux SDK (`swift sdk install <bundle URL> --checksum <sum>`, both listed on swift.org). For ARM Linux, run it with `SDK=aarch64-swift-linux-musl`.
 
-**Releases:** publishing a GitHub release runs `.github/workflows/macos.yml`, `linux.yml` and `windows.yml`, which build each platform's file and attach it to the release (or run one by hand with a tag).
+**Releases:** publishing a GitHub release runs `.github/workflows/macos.yml`, `linux.yml` and `windows.yml`, which build each platform's file and attach it to the release (or run one by hand with a tag). They need the `STEAMGRIDDB_API_KEY` repository secret. Builds without that key work, but add no artwork; to include it locally, set the variable before running `build-app.sh` or `build-linux.sh`.
 
 **Windows:** to build on Windows yourself with the Swift toolchain (the linker flags make it a windowless program, so no console opens at login):
 

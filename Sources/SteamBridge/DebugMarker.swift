@@ -52,25 +52,42 @@ public func runProcess(_ exe: String, _ args: [String]) -> (status: Int32, outpu
 }
 
 #if os(Windows)
-private let launchLock = NSLock()
-
 /// Foundation's Process gives a console program (tasklist, reg, tar) a console window of its own when the parent has none,
 /// as this windowless app hasn't: every Steam check flashed one. CREATE_NO_WINDOW runs it hidden.
-public func runProcessData(_ exe: String, _ args: [String]) -> (status: Int32, output: Data) {
+public func runProcessData(_ exe: String, _ args: [String], directory: URL? = nil) -> (status: Int32, output: Data) {
     var readEnd: HANDLE?, writeEnd: HANDLE?, pi = PROCESS_INFORMATION()
-    let started: Bool = launchLock.withLock {
-        // Only the child's end is inheritable, and only while it starts: another launch must not inherit it and hold the pipe open.
+    let cwd = directory.map { $0.withUnsafeFileSystemRepresentation { String(cString: $0!) } }
+    let started: Bool = {
         guard CreatePipe(&readEnd, &writeEnd, nil, 0) else { return false }
         defer { CloseHandle(writeEnd) }
         SetHandleInformation(writeEnd, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)
-        var si = STARTUPINFOW()
-        si.cb = DWORD(MemoryLayout<STARTUPINFOW>.size)
-        si.dwFlags = STARTF_USESTDHANDLES
-        si.hStdOutput = writeEnd  // no stdin or stderr: these programs read nothing, and their errors aren't needed
-        return windowsCommandLine([exe] + args).withCString(encodedAs: UTF16.self) {
-            CreateProcessW(nil, UnsafeMutablePointer<WCHAR>(mutating: $0), nil, nil, true, DWORD(CREATE_NO_WINDOW), nil, nil, &si, &pi)
-        }
-    }
+        // The child gets that end alone. By default it inherits every inheritable handle here, Foundation opens files
+        // inheritable, and a child holding an atomic write's temp file makes the rename fail (error 32), which callers `try?` away.
+        // The list also keeps another launch's child from holding this pipe open.
+        var size: SIZE_T = 0
+        InitializeProcThreadAttributeList(nil, 1, 0, &size)
+        let memory = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: 16)
+        defer { memory.deallocate() }
+        let list = OpaquePointer(memory)
+        guard InitializeProcThreadAttributeList(list, 1, 0, &size) else { return false }
+        defer { DeleteProcThreadAttributeList(list) }
+        let inherited = UnsafeMutablePointer<HANDLE?>.allocate(capacity: 1)  // the list points at it until CreateProcessW
+        defer { inherited.deallocate() }
+        inherited.initialize(to: writeEnd)
+        let handleList: DWORD_PTR = 0x0002_0002  // PROC_THREAD_ATTRIBUTE_HANDLE_LIST, a macro Swift doesn't import
+        guard UpdateProcThreadAttribute(list, 0, handleList, inherited, SIZE_T(MemoryLayout<HANDLE?>.size), nil, nil) else { return false }
+        var si = STARTUPINFOEXW()
+        si.StartupInfo.cb = DWORD(MemoryLayout<STARTUPINFOEXW>.size)
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES
+        si.StartupInfo.hStdOutput = writeEnd  // no stdin or stderr: these programs read nothing, and their errors aren't needed
+        si.lpAttributeList = list
+        let flags = DWORD(CREATE_NO_WINDOW) | DWORD(EXTENDED_STARTUPINFO_PRESENT)
+        return withUnsafeMutablePointer(to: &si) { $0.withMemoryRebound(to: STARTUPINFOW.self, capacity: 1) { startup in
+            windowsCommandLine([exe] + args).withCString(encodedAs: UTF16.self) { line in
+                withWide(cwd) { CreateProcessW(nil, UnsafeMutablePointer(mutating: line), nil, nil, true, flags, nil, $0, startup, &pi) }
+            }
+        } }
+    }()
     defer { if let readEnd { CloseHandle(readEnd) } }
     guard started else { return (-1, Data()) }
     defer { CloseHandle(pi.hProcess); CloseHandle(pi.hThread) }
@@ -81,11 +98,17 @@ public func runProcessData(_ exe: String, _ args: [String]) -> (status: Int32, o
     GetExitCodeProcess(pi.hProcess, &code)
     return (Int32(bitPattern: code), out)
 }
+
+private func withWide<R>(_ s: String?, _ body: (UnsafePointer<WCHAR>?) -> R) -> R {
+    guard let s else { return body(nil) }
+    return s.withCString(encodedAs: UTF16.self, body)
+}
 #else
-public func runProcessData(_ exe: String, _ args: [String]) -> (status: Int32, output: Data) {
+public func runProcessData(_ exe: String, _ args: [String], directory: URL? = nil) -> (status: Int32, output: Data) {
     let p = Process(), out = Pipe()
     p.executableURL = URL(fileURLWithPath: exe)
     p.arguments = args
+    p.currentDirectoryURL = directory
     p.standardOutput = out
     p.standardError = FileHandle.nullDevice
     do { try p.run() } catch { return (-1, Data()) }

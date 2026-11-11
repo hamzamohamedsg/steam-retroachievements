@@ -5,6 +5,9 @@ import Foundation
 import Observation
 import RACore
 import SteamBridge
+#if os(Windows)
+import WinSDK
+#endif
 
 /// Everything the app does on every platform. Settings and Add Games are dialogs inside Steam (steam/inject.js).
 @MainActor @Observable final class AppModel {
@@ -14,6 +17,7 @@ import SteamBridge
     var steamState: SteamState = .steamNotRunning
     /// A newer release on GitHub, if there is one.
     var update: (version: String, page: URL)?
+    var updating = false
 
     @ObservationIgnored let marker: DebugMarker
     @ObservationIgnored let steam: SteamConnection
@@ -36,9 +40,15 @@ import SteamBridge
                 signIn: { username, apiKey in await AppModel.shared.signIn(username: username, apiKey: apiKey) },
                 signOut: { await AppModel.shared.signOut() },
                 setOpenAtLogin: { on in await AppModel.shared.setOpenAtLogin(on) },
-                uninstall: { await AppModel.shared.uninstall() }),
+                uninstall: { await AppModel.shared.uninstall() },
+                updateVersion: { await MainActor.run { AppModel.shared.update?.version } },
+                installUpdate: { await AppModel.shared.installUpdate() },
+                // Detached and off the main actor: xdg-open can hold on until the viewer closes.
+                openLog: { Task.detached { AppModel.open(AppPaths.log) } },
+                credentials: { await MainActor.run { AppModel.shared.credentials } },
+                steamState: { await MainActor.run { "\(AppModel.shared.steamState)" } }),
             push: { js in await AppModel.shared.run(js) },
-            folderFile: AppPaths.data.appendingPathComponent("rom-folder.txt")))
+            folderFile: AppPaths.data.appendingPathComponent("rom-folder.txt"), logFile: AppPaths.log))
         services = credentials.map { Services(credentials: $0, dataDirectory: AppPaths.data) }
     }
 
@@ -65,6 +75,9 @@ import SteamBridge
         #elseif os(Windows)
         // The Run value starts the copy that set it: point it at this one, so an update unzipped somewhere else is the one that starts at login.
         if LoginItem.isEnabled, !LoginItem.startsThisCopy { _ = setOpenAtLogin(true) }
+        #endif
+        #if !os(macOS)  // macOS clears up after itself; listing a Mac app's folder at every start could raise a privacy prompt
+        Updater.removeLeftovers(in: URL(fileURLWithPath: AppPaths.executable).deletingLastPathComponent())
         #endif
         steam.onStateChange = { [weak self] state in
             guard let self else { return }
@@ -144,7 +157,71 @@ import SteamBridge
         }
     }
 
-    static func open(_ url: URL) {
+    /// Update Now, from the menu, the tray or the Steam dialog. nil when the new copy is starting, otherwise the error to show.
+    /// Whatever goes wrong, the old copy keeps running and the release page opens.
+    func installUpdate() async -> String? {
+        guard let update, !updating else { return "An update is already running." }
+        updating = true
+        defer { updating = false }
+        // Read now: once the running program is renamed aside, its reported path can be the aside name.
+        let executable = AppPaths.executable
+        do {
+            guard let layout = Updater.layout(executable: executable, app: AppPaths.app) else { throw UpdateFailure.notWritable }
+            try await Updater.install(layout: layout, check: AppModel.runs, relaunch: { AppModel.relaunch(layout, executable: executable) })
+            Log.info("updated to \(update.version)")
+            #if os(macOS)
+            // Linux's and Windows's new copies stop this one when they start; macOS has no such handover.
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                exit(0)
+            }
+            #endif
+            return nil
+        } catch {
+            Log.error("update: \(error)")
+            AppModel.open(update.page)
+            return "The update couldn't be installed here, so its release page has opened instead."
+        }
+    }
+
+    /// Tries the staged copy before anything is replaced. A release that ignored --version would hang here with the old copy still running.
+    nonisolated static func runs(_ program: URL) -> Bool {
+        #if os(macOS)
+        let app = program.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        guard runProcess("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]).status == 0 else { return false }
+        #endif
+        return runProcess(program.path, ["--version"]).status == 0
+    }
+
+    /// Starts the new copy, which is in place by now. False puts the old copy back.
+    nonisolated static func relaunch(_ layout: UpdateLayout, executable: String) -> Bool {
+        #if os(macOS)
+        return runProcess("/usr/bin/open", ["-n", layout.folder.appendingPathComponent(layout.program.components(separatedBy: "/")[0]).path]).status == 0
+        #else
+        #if os(Linux)
+        // Under the login service, restart it so the new copy stays under the service. --no-block: the restart stops this process.
+        if (try? String(contentsOfFile: "/proc/self/cgroup", encoding: .utf8))?.contains("/\(LoginItem.unit)") == true {
+            return runProcess("/usr/bin/env", ["systemctl", "--user", "--no-block", "restart", LoginItem.unit]).status == 0
+        }
+        #endif
+        #if os(Windows)
+        // Not Process: it hands the child every inheritable handle open here, and this child runs for good, holding them.
+        var si = STARTUPINFOW(), pi = PROCESS_INFORMATION()
+        si.cb = DWORD(MemoryLayout<STARTUPINFOW>.size)
+        let started = "\"\(executable)\"".withCString(encodedAs: UTF16.self) {
+            CreateProcessW(nil, UnsafeMutablePointer(mutating: $0), nil, nil, false, 0, nil, nil, &si, &pi)
+        }
+        if started { CloseHandle(pi.hProcess); CloseHandle(pi.hThread) }
+        return started
+        #else
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        return (try? process.run()) != nil
+        #endif
+        #endif
+    }
+
+    nonisolated static func open(_ url: URL) {
         #if os(macOS)
         NSWorkspace.shared.open(url)
         #elseif os(Windows)

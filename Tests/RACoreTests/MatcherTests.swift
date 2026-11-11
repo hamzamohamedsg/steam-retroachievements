@@ -43,6 +43,14 @@ func matcher(_ result: HashResult, lists: [Int: [RAGameListEntry]] = [7: [smbEnt
     #expect(store.record(romPath: "/r/nes/Super Mario Bros. (World).nes")?.gameId == 1446)
 }
 
+@Test func aChoiceThatCantBeSavedFails() async throws {
+    let blocker = tempDir().appendingPathComponent("a file")
+    try Data().write(to: blocker)
+    let store = MatchStore(file: blocker.appendingPathComponent("m.json"))  // its folder can't be made
+    await #expect(throws: (any Error).self) { _ = try await matcher(.hash("abc"), store: store).choose(smb(), gameId: 1446, consoleId: 7) }
+    #expect(store.record(romPath: "/r/nes/Super Mario Bros. (World).nes") == nil)  // so it doesn't look saved until the next start
+}
+
 @Test func nameMatchWithUnknownHashWarns() async throws {
     #expect(try await matcher(.hash("zzz")).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .unrecognizedHash))
 }
@@ -116,7 +124,7 @@ let bonusEntry = RAGameListEntry(id: 900, title: "Super Mario Bros. [Subset - Bo
 @Test func oldSubsetMatchMovesToBaseGame() async throws {
     let rom = "/r/nes/Super Mario Bros. (World).nes"
     let store = MatchStore(file: tempDir().appendingPathComponent("m.json"))
-    store.save(romPath: rom, MatchRecord(gameId: 900, consoleId: 7, manual: false, hash: "abc", size: 0, modified: 0))
+    try store.save(romPath: rom, MatchRecord(gameId: 900, consoleId: 7, manual: false, hash: "abc", size: 0, modified: 0))
     #expect(try await matcher(.hash("abc"), lists: [7: [bonusEntry, smbEntry]], store: store).resolve(smb()) == .matched(gameId: 1446, consoleId: 7, verification: .verified))
     #expect(store.record(romPath: rom)?.gameId == 1446)
 }

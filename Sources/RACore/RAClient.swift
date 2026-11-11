@@ -5,7 +5,11 @@ import FoundationNetworking
 
 public protocol HTTPTransport: Sendable {
     /// Body and HTTP status.
-    func get(_ url: URL) async throws -> (Data, Int)
+    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int)
+}
+
+public extension HTTPTransport {
+    func get(_ url: URL) async throws -> (Data, Int) { try await get(url, headers: [:]) }
 }
 
 public struct URLSessionTransport: HTTPTransport {
@@ -18,9 +22,10 @@ public struct URLSessionTransport: HTTPTransport {
     }()
 
     public init() {}
-    public func get(_ url: URL) async throws -> (Data, Int) {
+    public func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("steam-retroachievements/0.1", forHTTPHeaderField: "User-Agent")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await Self.session.data(for: request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
@@ -54,7 +59,7 @@ public final class RAClient: RAProviding {
     }
 
     public func gameProgress(gameId: Int) async throws -> RAGameProgress {
-        try decode(RAGameProgress.self, try await request("API_GetGameInfoAndUserProgress.php", ["g": "\(gameId)", "u": credentials.username]))
+        try decode(RAGameProgress.self, try await request("API_GetGameInfoAndUserProgress.php", ["g": "\(gameId)", "u": credentials.username, "a": "1"]))
     }
 
     public func recentlyPlayed(offset: Int) async throws -> [RARecentGame] {

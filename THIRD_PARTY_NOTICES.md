@@ -15,6 +15,10 @@
 
 `Vendor/libchdr/include/libchdr/chdr.h` is the only file added: an umbrella header for SwiftPM.
 
+## LZMA SDK
+
+`Vendor/lzma-sdk-26.06/C/` holds the 7z decoder files from 7-Zip 26.06's source (https://github.com/ip7z/7zip, release 26.06). They read `.7z` archives and are placed in the public domain by Igor Pavlov, as each file's header states. Only the decoder files are copied.
+
 ## achievement-companion
 
 The Steam panel's colour palette (`steam/inject.js`) follows `frontend/styles/panelCss.ts` from https://github.com/otowm/achievement-companion. The project's README states it is MIT licensed. The repository has no LICENSE file, so the README is the source of that statement. No code was copied; only colour values were reused.

@@ -10,6 +10,7 @@ enum Tray {
     static let callbackMessage = UINT(WM_APP + 1)
     static let quitCommand = 1
     static let updateCommand = 2
+    static let installCommand = 3
     static let update = Mutex<(version: String, page: URL)?>(nil)
 
     static func start() {
@@ -87,6 +88,10 @@ enum Tray {
             Task { @MainActor in AppModel.open(page) }
             return 0
         }
+        if msg == UINT(WM_COMMAND), Int(wParam & 0xFFFF) == installCommand {
+            Task { @MainActor in _ = await AppModel.shared.installUpdate() }
+            return 0
+        }
         if msg == taskbarCreated {
             addIcon(hwnd)
             return 0
@@ -102,6 +107,7 @@ enum Tray {
         status.withLock { $0 }.withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING | MF_GRAYED), 0, $0) }
         _ = AppendMenuW(menu, UINT(MF_SEPARATOR), 0, nil)
         if let version = update.withLock({ $0?.version }) {
+            "Update Now (\(version))".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(installCommand), $0) }
             "Update available: \(version)".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(updateCommand), $0) }
         }
         "Quit Steam RetroAchievements".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(quitCommand), $0) }

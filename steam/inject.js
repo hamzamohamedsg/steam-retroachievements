@@ -146,6 +146,23 @@
     return out;
   });
 
+  // SteamGridDB art for new shortcuts. The app fetches it and only images come here. The first error (rate limit, no network) ends the run.
+  const addArtwork = safe(async (added) => {
+    // 3 games at a time, each fetching its 5 kinds at once: fast without tripping SteamGridDB's rate limit.
+    const queue = [...added];
+    let failed = false;
+    const worker = async () => {
+      for (let g; !failed && (g = queue.shift());) {
+        try {
+          const art = await call("artwork", { title: g.name, appid: g.appid }, 120000);
+          await Promise.all(art.images.map((i) => SteamClient.Apps.SetCustomArtworkForApp(g.appid, i.data, i.ext, i.assetType)));
+          if (art.iconPath) SteamClient.Apps.SetShortcutIcon(g.appid, art.iconPath);
+        } catch (e) { failed = true; throw e; }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+  });
+
   // ---------------------------------------------------------------- drawing helpers
   const CSS_TEXT = `
   .sra-head { font-size: 14px; color: rgb(148, 161, 166); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
@@ -178,6 +195,7 @@
   .sra-input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
   .sra-form label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   .sra-form .sra-head { margin: 18px 0 8px; }
+  .sra-diagnostics { width: 100%; box-sizing: border-box; font: 11px monospace; }
   .sra-form label.sra-check { flex-direction: row; align-items: center; gap: 8px; }
   .sra-error { color: #ff7b7b; font-size: 12px; }
   .sra-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
@@ -210,6 +228,9 @@
   .sra-menu[data-sra] { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.7); }
   .sra-set { background: none; border: 0; padding: 0; cursor: pointer; opacity: 0.45; } .sra-set:hover, .sra-set.sra-shown { opacity: 1; }
   .sra-set img { display: block; width: 36px; height: 36px; border-radius: 2px; }
+  .sra-missable { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 2px; background: rgba(229, 181, 13, 0.18); color: #e5b50d; font-size: 11px; line-height: 16px; }
+  :has(> .sra-missable-mark) { position: relative; }
+  .sra-missable-mark { position: absolute; top: 0; right: 0; width: 14px; height: 14px; border-radius: 0 0 0 3px; background: #e5b50d; color: #000; font-size: 11px; font-weight: 700; line-height: 14px; text-align: center; }
   `;
 
   const el = (doc, tag, props = {}, ...children) => {
@@ -250,6 +271,9 @@
   // RetroAchievements counts hardcore and softcore unlocks apart: each unlock says which, and hardcore icons get RA's gold frame.
   const mode = (r) => r?.unlocked && r.hardcore !== undefined ? (r.hardcore ? "Hardcore" : "Softcore") : null;
   const hc = (r) => r?.unlocked && r.hardcore ? " sra-hc" : "";
+  const missableTag = (doc, r) => r?.missable && el(doc, "span", { class: "sra-missable" }, "Missable");
+  // Icon rows have no room for the word: a mark on the icon, and the hover card or focused card says it.
+  const missableMark = (doc, r) => r?.missable && el(doc, "span", { class: "sra-missable-mark", role: "img", "aria-label": "Missable" }, "!");
   const achievementURL = (r) => `https://retroachievements.org/achievement/${r.id}`;
   // Big Picture (and the Deck's Game Mode) gets Steam's own browser: a desktop browser opened by the app wouldn't show there.
   const openRA = safe((url) => current?.bpm ? SteamClient.URL.ExecuteSteamURL(`steam://openurl/${url}`) : call("openURL", { url }));
@@ -263,7 +287,7 @@
         el(doc, "div", { class: c(B, "Background") }, el(doc, "div", { class: c(B, "BlurContainer") }, el(doc, "img", { src: row.badgeURL, alt: "" }))),
         el(doc, "div", { class: c(A, "TopSection") },
           el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "TopSectionAchievementIcon", "Icon") + hc(row) }, el(doc, "img", { class: c(I, "Icon"), src: row.badgeURL, alt: "" })),
-          el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, row.title), el(doc, "div", { class: c(A, "Desc") }, row.description))),
+          el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, row.title), el(doc, "div", { class: c(A, "Desc") }, missableTag(doc, row), row.description))),
         el(doc, "div", { class: c(A, "Unlocked") }, row.unlockedText && el(doc, "div", {}, row.unlockedText), el(doc, "div", {}, points),
           row.rarityText && el(doc, "div", {}, row.rarityText)))));
     hoverCard = el(doc, "div", { class: c(H, "HoverPositionOuter"), popover: "manual" }, pos);
@@ -335,7 +359,8 @@
 
   const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel sra-stat",
       onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard, onclick: () => openRA(achievementURL(row)) },
-    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") + hc(row) }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })));
+    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") + hc(row) }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })),
+    missableMark(doc, row));
 
   // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
   const subsetName = (sp) => /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
@@ -384,7 +409,7 @@
     fill.style.width = `${s?.percent ?? 0}%`;
     return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv", ...(perfect ? ["AllAchieved"] : [])) + (perfect ? " sra-perfect" : "") },
       el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, s.text.replace(/\s*\(\d+%\)$/, "")), " ",
-        el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`)] : el(doc, "span", {}, p.message)),
+        el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`), s.awardText && ` · ${s.awardText}`] : el(doc, "span", {}, p.message)),
       s && el(doc, "div", { class: c(A, "AchievementProgressContainer") }, fill),
       perfect && ribbon(doc, c(A, "Ribbon")),
       el(doc, "div", { class: c(A, "GlobalStatLabel") }));
@@ -571,14 +596,14 @@
     for (const n of item.closest(".sra-carousel").querySelectorAll(".sra-item")) { n.classList.remove(...c(A, "Detailed").split(" ").filter(Boolean)); n.querySelector(".sra-card")?.remove(); }
     item.classList.add(...c(A, "Detailed").split(" ").filter(Boolean));
     item.append(el(item.ownerDocument, "div", { class: c(A, "AchivementCarouselItemDetails") + " sra-card" }, el(item.ownerDocument, "div", { class: c(A, "Name") }, r.title),
-      el(item.ownerDocument, "div", { class: c(A, "Description") }, r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, [mode(r), r.rarityText].filter(Boolean).join(" · "))));
+      el(item.ownerDocument, "div", { class: c(A, "Description") }, missableTag(item.ownerDocument, r), r.description), el(item.ownerDocument, "div", { class: c(A, "Achieved") }, [mode(r), r.rarityText].filter(Boolean).join(" · "))));
   };
   const carouselItem = (doc, r, open, big, url) => {
     const A = K.ach(), I = K.icon();
     const item = el(doc, "div", { class: c(A, "AchievementCarouselItem") + " Panel Focusable sra-item", role: "button", tabindex: "0", "aria-label": r.title, onclick: open,
         onfocus: () => { detail(item); item.scrollIntoView({ block: "nearest", inline: "nearest" }); } },
       el(doc, "div", { class: c(A, r.unlocked ? "Achieved" : "NotAchieved") + " Panel" }, el(doc, "div", { class: c(A, "AchievementHoverContainer") + " Panel" },
-        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })))));
+        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon", "CarouselIcon", ...(big ? ["Prioritized"] : [])) + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" })), missableMark(doc, r))));
     item.sraRow = r;
     item.sraURL = url;
     return item;
@@ -683,7 +708,7 @@
         onclick: () => openRA(achievementURL(r)), onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
       el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
       el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
-        el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, r.description),
+        el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, missableTag(doc, r), r.description),
         el(doc, "div", { class: c(L, "AchievementGlobalPercentage", "InBody") }, [`${r.points} points`, mode(r), tab === "my" && r.rarityText].filter(Boolean).join(" · ")))),
       el(doc, "div", { class: c(L, "Right") }, el(doc, "div", { class: c(L, "VerticalContent", "AlignEnd") },
         tab === "global" ? [el(doc, "div", { class: c(L, "ProgressCount") }, r.rarity == null ? "" : `${r.rarity.toFixed(1)}%`), el(doc, "div", { class: c(L, "ProgressBar") }, bar(r.rarity ?? 0))]
@@ -764,7 +789,14 @@
       const hits = await call("searchGames", { consoleId: Number(select.value), query: input.value });
       if (mine !== seq) return;
       results.replaceChildren(...hits.map((g) => el(doc, "div", { class: "sra-row sra-pick", onclick: async () => {
-        const payload = await call("chooseGame", { shortcut, gameId: g.gameId, consoleId: Number(select.value) });
+        let payload;
+        try {
+          payload = await call("chooseGame", { shortcut, gameId: g.gameId, consoleId: Number(select.value) });
+        } catch (e) {
+          log("error", `chooseGame: ${e?.message ?? e}`);
+          results.replaceChildren(el(doc, "div", { class: "sra-error" }, "Couldn't save your choice. Try again."));
+          return;
+        }
         closeOverlay?.();
         if (current?.appid === appid) render(payload);
       } }, el(doc, "img", { src: g.iconURL, alt: "" }),
@@ -784,6 +816,12 @@
   const desktopDoc = () => { const s = steamUI.surface(); return s && !s.bpm ? s.doc : null; };
   const head = (doc, text) => el(doc, "div", { class: "sra-head" }, text);
   const signedInChanged = () => { syncPlaytimes(); if (current) { current.payload = null; load(current.appid, "getPanel"); } };
+
+  // navigator.clipboard exists in Steam's desktop window (checked 2026-11-09) but needs that window focused; execCommand is the fallback.
+  const copyText = async (doc, area) => {
+    try { await doc.defaultView.navigator.clipboard.writeText(area.value); return true; } catch (_) {}
+    try { area.focus(); area.select(); return doc.execCommand("copy"); } catch (_) { return false; }
+  };
 
   const openSettings = safe(async () => {
     const doc = desktopDoc();
@@ -813,7 +851,7 @@
           draw();
         } },
         el(doc, "label", {}, "Username", user), el(doc, "label", {}, "Web API key", key),
-        el(doc, "button", { class: "sra-link", type: "button", onclick: () => call("openURL", { url: "https://retroachievements.org/settings" }) }, "Find your Web API key"),
+        el(doc, "button", { class: "sra-link", type: "button", onclick: () => call("openURL", { url: "https://retroachievements.org/settings?tab=applications" }) }, "Find your Web API key"),
         error, el(doc, "div", { class: "sra-actions" }, submit)));
         setTimeout(() => user.focus(), 0);
       }
@@ -822,6 +860,42 @@
       const login = el(doc, "input", { type: "checkbox", onchange: async () => { login.checked = await call("setOpenAtLogin", { on: login.checked }); } });
       login.checked = s.openAtLogin;
       kids.push(head(doc, "General"), el(doc, "label", { class: "sra-check" }, login, "Open at login"));
+      if (s.updateVersion) {
+        const note = el(doc, "span", { class: "sra-muted" }, `Version ${s.updateVersion} is available.`);
+        const update = el(doc, "button", { class: "sra-btn", onclick: async () => {
+          update.disabled = true;
+          note.textContent = "Downloading the update…";
+          const r = await call("installUpdate").catch(() => ({ error: "The update couldn't be installed." }));
+          if (r.error) { note.textContent = r.error; update.disabled = false; return; }
+          note.textContent = "Restarting with the new version…";
+        } }, "Update Now");
+        kids.push(head(doc, "Update"), el(doc, "div", { class: "sra-actions" }, note, update));
+      }
+      const copied = el(doc, "span", { class: "sra-muted" });
+      const manual = el(doc, "div");
+      const copy = el(doc, "button", { class: "sra-btn", onclick: async () => {
+        copy.disabled = true;
+        copied.textContent = "";
+        manual.replaceChildren();
+        try {
+          const info = await (async () => SteamClient.System.GetSystemInfo())().catch(() => null);
+          const area = el(doc, "textarea", { class: "sra-input sra-diagnostics", readonly: "", rows: "10", style: "position: fixed; opacity: 0" },
+            await call("diagnostics", { steamBuild: Number.isInteger(info?.nSteamVersion) ? info.nSteamVersion : undefined }));
+          manual.replaceChildren(area);
+          if (await copyText(doc, area)) { manual.replaceChildren(); copied.textContent = "Copied"; copy.disabled = false; copy.focus(); return; }
+          area.removeAttribute("style");
+          area.focus();
+          area.select();
+          copied.textContent = "Couldn't reach the clipboard. Copy the selected text below.";
+        } catch (e) {
+          copied.textContent = "Couldn't collect the diagnostics.";
+          throw e;
+        } finally {
+          copy.disabled = false;
+        }
+      } }, "Copy Diagnostics");
+      kids.push(head(doc, "Troubleshooting"), el(doc, "div", { class: "sra-actions" },
+        el(doc, "button", { class: "sra-btn", onclick: () => call("openLog") }, "Open Log"), copy, copied), manual);
       const uninstall = el(doc, "div", { class: "sra-actions" });
       const ask = () => uninstall.replaceChildren(
         el(doc, "span", { class: "sra-muted" }, "This turns off Steam's debug switch and deletes your saved sign-in and cached data. On a Mac it also moves the app to the Trash; elsewhere, delete the program's folder afterwards. Games it added stay in your library. Restart Steam when it's done."),
@@ -893,6 +967,7 @@
       st.added.push(...items.filter((_, n) => !results[n].error).map((i) => i.shortcut));
       const errors = results.filter((r) => r.error).map((r) => `${r.name}: ${r.error}`);
       await scan([`Added ${results.length - errors.length} games to Steam.`, ...errors].join("\n"));
+      addArtwork(results.filter((r) => !r.error));  // not awaited: art never holds up the add
     });
     overlay(doc, "Add Games", el(doc, "div", { class: "sra-search" }, folder, el(doc, "button", { class: "sra-btn", onclick: () => scan() }, "Scan")), list, footer);
     scan();
@@ -938,7 +1013,7 @@
   const steamAchievements = new Map();  // appid → details.achievements (the main set)
   const steamSets = new Map();  // appid → { payload, shown: RA game id of the set in Steam's window }
   // The URL fragment marks hardcore unlocks for CSS_TEXT's gold frame; Steam has no field for it.
-  const toRows = (sp) => sp?.state !== "matched" ? [] : sp.achievements.map((r) => ({ strID: String(r.id), strName: r.title, strDescription: r.description,
+  const toRows = (sp) => sp?.state !== "matched" ? [] : sp.achievements.map((r) => ({ strID: String(r.id), strName: r.title, strDescription: (r.missable ? "Missable: " : "") + r.description,
     bAchieved: r.unlocked, rtUnlocked: r.unlockedAt ?? 0, strImage: r.badgeURL + (r.unlocked && r.hardcore ? "#hardcore" : ""), bHidden: false,
     flMinProgress: 0, flCurrentProgress: 0, flMaxProgress: 0, flAchieved: r.rarity ?? 0 }));
   const setsOf = (p) => [p, ...(p.subsets ?? []).filter((sp) => sp.state === "matched")];

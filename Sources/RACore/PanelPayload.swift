@@ -17,7 +17,7 @@ public struct PanelPayload: Codable, Equatable, Sendable {
         public var label, value: String
         public init(label: String, value: String) { self.label = label; self.value = value }
     }
-    public struct Summary: Codable, Equatable, Sendable { public var text, pointsText: String; public var hardcoreText: String?; public var percent: Int }
+    public struct Summary: Codable, Equatable, Sendable { public var text, pointsText: String; public var hardcoreText, awardText: String?; public var percent: Int }
     public struct Row: Codable, Equatable, Sendable {
         public var id: Int
         public var title, description: String
@@ -31,6 +31,8 @@ public struct PanelPayload: Codable, Equatable, Sendable {
         public var rarity: Double?
         /// The unlock as Unix seconds, for Steam's own achievements store (the in-game overlay).
         public var unlockedAt: Int?
+        /// Can be permanently missed and is still locked.
+        public var missable: Bool
     }
 
     init(state: String, message: String? = nil, notice: String? = nil, consoleId: Int? = nil) {
@@ -40,6 +42,7 @@ public struct PanelPayload: Codable, Equatable, Sendable {
 
 public enum PanelBuilder {
     static let media = "https://media.retroachievements.org"
+    static let awards = ["mastered": "Mastered", "completed": "Completed", "beaten-hardcore": "Beaten (Hardcore)", "beaten-softcore": "Beaten"]
 
     public static func matched(_ p: RAGameProgress, verification: Verification, emulatorName: String, stale: Bool, savedAt: Date?,
                                timeZone: TimeZone = .current, locale: Locale = .current) -> PanelPayload {
@@ -74,7 +77,8 @@ public enum PanelBuilder {
                          unlocked: isUnlocked, hardcore: a.dateEarnedHardcore != nil,
                          unlockedText: earned(a).map { "Unlocked " + full.string(from: $0) },
                          rarityText: rarity(a).map { String(format: "%.1f%% of players have this achievement", $0) },
-                         unlockedDay: earned(a).map(day), rarity: rarity(a), unlockedAt: earned(a).map { Int($0.timeIntervalSince1970) })
+                         unlockedDay: earned(a).map(day), rarity: rarity(a), unlockedAt: earned(a).map { Int($0.timeIntervalSince1970) },
+                         missable: !isUnlocked && a.type == "missable")
         }
 
         if !p.achievements.isEmpty {
@@ -82,7 +86,8 @@ public enum PanelBuilder {
             let hardcore = p.achievements.filter { $0.dateEarnedHardcore != nil }.count
             out.summary = .init(text: "You've unlocked \(pct == 100 ? "all achievements! " : "")\(unlocked.count)/\(total) (\(pct)%)",
                                 pointsText: "\(unlocked.reduce(0) { $0 + $1.points }) / \(p.achievements.reduce(0) { $0 + $1.points }) points",
-                                hardcoreText: hardcore > 0 ? "\(hardcore) in hardcore" : nil, percent: pct)
+                                hardcoreText: hardcore > 0 ? "\(hardcore) in hardcore" : nil,
+                                awardText: p.highestAwardKind.flatMap { awards[$0] }, percent: pct)
         }
         if stale, let savedAt { out.updatedText = lastUpdated(savedAt) }
         return out

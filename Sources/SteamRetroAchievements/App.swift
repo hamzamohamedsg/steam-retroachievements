@@ -1,11 +1,18 @@
 #if os(macOS)
 import AppKit
+import RACore
 import SwiftUI
 
 @main
 struct SteamRetroAchievementsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    let model = AppModel.shared
+    let model: AppModel
+
+    init() {
+        // The updater runs a new copy with this before replacing the old one, so every release must keep answering it, first.
+        if CommandLine.arguments.contains("--version") { print(UpdateChecker.currentVersion); exit(0) }
+        model = AppModel.shared
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -35,6 +42,7 @@ struct MenuContent: View {
         Button("Settings…") { openInSteam("openSettings") }.disabled(model.steamState != .connected)
         if let update = model.update {
             Divider()
+            Button(model.updating ? "Updating…" : "Update Now (\(update.version))") { Task { _ = await model.installUpdate() } }.disabled(model.updating)
             Button("Update Available: \(update.version)…") { AppModel.open(update.page) }
         }
         Divider()
@@ -59,10 +67,15 @@ struct MenuContent: View {
     }
 }
 #else
+import Foundation
+import RACore
+
 /// Linux and Windows: no menu bar, just the background program. Status goes to the terminal (Linux), the tray (Windows) and the log.
 @main
 enum Headless {
     @MainActor static func main() async {
+        // The updater runs a new copy with this before replacing the old one, so every release must keep answering it, first.
+        if CommandLine.arguments.contains("--version") { print(UpdateChecker.currentVersion); exit(0) }
         #if os(Windows)
         Tray.replaceRunningCopy()
         Tray.start()

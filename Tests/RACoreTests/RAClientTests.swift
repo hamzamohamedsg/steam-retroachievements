@@ -8,9 +8,14 @@ func fixture(_ name: String) -> Data {
 
 final class FakeTransport: HTTPTransport, @unchecked Sendable {
     var urls: [URL] = []
+    var headers: [URL: [String: String]] = [:]
     let respond: @Sendable (URL) -> (Data, Int)
     init(_ respond: @escaping @Sendable (URL) -> (Data, Int)) { self.respond = respond }
-    func get(_ url: URL) async throws -> (Data, Int) { urls.append(url); return respond(url) }
+    private let lock = NSLock()
+    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) {
+        lock.withLock { urls.append(url); self.headers[url] = headers }
+        return respond(url)
+    }
 }
 
 let creds = RACredentials(username: "Max Milyin", apiKey: "k&1")
@@ -54,7 +59,26 @@ let creds = RACredentials(username: "Max Milyin", apiKey: "k&1")
     let q = Dictionary(uniqueKeysWithValues: c.queryItems!.map { ($0.name, $0.value!) })
     #expect(c.host == "retroachievements.org")
     #expect(c.path == "/API/API_GetGameInfoAndUserProgress.php")
-    #expect(q == ["g": "14402", "u": "Max Milyin", "y": "k&1"])
+    #expect(q == ["a": "1", "g": "14402", "u": "Max Milyin", "y": "k&1"])
+}
+
+@Test func decodesAwardAndAchievementType() throws {
+    func decode(_ extra: String, type: String) throws -> RAGameProgress {
+        let json = #"{"ID":1,"Title":"T","ConsoleID":1\#(extra),"Achievements":{"9":{"ID":9,"Title":"A","Description":"D","Points":5,"BadgeName":"b","DisplayOrder":1,"NumAwarded":1,"NumAwardedHardcore":0\#(type)}}}"#
+        return try RADate.decoder.decode(RAGameProgress.self, from: Data(json.utf8))
+    }
+    let full = try decode(#","HighestAwardKind":"mastered","HighestAwardDate":"2024-04-23T21:28:49+00:00""#, type: #","type":"missable""#)
+    #expect(full.highestAwardKind == "mastered" && full.achievements[0].type == "missable")
+    // Progress cached before this change has neither; the API sends null for no award and for untyped achievements.
+    let old = try decode("", type: "")
+    #expect(old.highestAwardKind == nil && old.achievements[0].type == nil)
+    let nulls = try decode(#","HighestAwardKind":null,"HighestAwardDate":null"#, type: #","type":null"#)
+    #expect(nulls.highestAwardKind == nil && nulls.achievements[0].type == nil)
+    let unknown = try decode(#","HighestAwardKind":"platinum""#, type: #","type":"secret""#)
+    #expect(unknown.highestAwardKind == "platinum" && unknown.achievements[0].type == "secret")
+    // Both survive the app's own cache, which is what a game page shows first.
+    let cached = try RADate.decoder.decode(RAGameProgress.self, from: try RADate.encoder.encode(full))
+    #expect(cached == full)
 }
 
 @Test func unauthorizedIsBadCredentials() async {
@@ -90,7 +114,7 @@ final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1
 }
 
 struct ThrowingTransport: HTTPTransport {
-    func get(_ url: URL) async throws -> (Data, Int) {
+    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) {
         throw URLError(.notConnectedToInternet, userInfo: [NSURLErrorFailingURLStringErrorKey: url.absoluteString])
     }
 }
