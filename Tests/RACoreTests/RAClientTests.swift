@@ -11,7 +11,11 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
     var headers: [URL: [String: String]] = [:]
     let respond: @Sendable (URL) -> (Data, Int)
     init(_ respond: @escaping @Sendable (URL) -> (Data, Int)) { self.respond = respond }
-    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) { urls.append(url); self.headers[url] = headers; return respond(url) }
+    private let lock = NSLock()
+    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) {
+        lock.withLock { urls.append(url); self.headers[url] = headers }
+        return respond(url)
+    }
 }
 
 let creds = RACredentials(username: "Max Milyin", apiKey: "k&1")

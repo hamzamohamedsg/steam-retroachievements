@@ -148,11 +148,19 @@
 
   // SteamGridDB art for new shortcuts. The app fetches it and only images come here. The first error (rate limit, no network) ends the run.
   const addArtwork = safe(async (added) => {
-    for (const { name, appid } of added) {
-      const art = await call("artwork", { title: name, appid }, 120000);
-      for (const i of art.images) await SteamClient.Apps.SetCustomArtworkForApp(appid, i.data, i.ext, i.assetType);
-      if (art.iconPath) SteamClient.Apps.SetShortcutIcon(appid, art.iconPath);
-    }
+    // 3 games at a time, each fetching its 5 kinds at once: fast without tripping SteamGridDB's rate limit.
+    const queue = [...added];
+    let failed = false;
+    const worker = async () => {
+      for (let g; !failed && (g = queue.shift());) {
+        try {
+          const art = await call("artwork", { title: g.name, appid: g.appid }, 120000);
+          await Promise.all(art.images.map((i) => SteamClient.Apps.SetCustomArtworkForApp(g.appid, i.data, i.ext, i.assetType)));
+          if (art.iconPath) SteamClient.Apps.SetShortcutIcon(g.appid, art.iconPath);
+        } catch (e) { failed = true; throw e; }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
   });
 
   // ---------------------------------------------------------------- drawing helpers

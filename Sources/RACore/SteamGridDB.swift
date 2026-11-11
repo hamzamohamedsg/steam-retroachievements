@@ -47,10 +47,20 @@ public struct SteamGridDB: Sendable {
         guard !key.isEmpty, let term = title.addingPercentEncoding(withAllowedCharacters: pathSafe) else { return ([], nil) }
         let games: [Game] = try await list("/search/autocomplete/\(term)")
         guard let game = games.first else { return ([], nil) }
+        // All kinds at once: one after another took 10 round trips per game.
+        let found = try await withThrowingTaskGroup(of: (Int, URL, Data)?.self) { group in
+            for (i, kind) in Self.kinds.enumerated() {
+                group.addTask {
+                    let found: [Art] = try await list("/\(kind.path)/game/\(game.id)?\(kind.query)")
+                    guard let url = found.lazy.compactMap({ Self.imageURL($0.url) }).first, let bytes = await download(url) else { return nil }
+                    return (i, url, bytes)
+                }
+            }
+            return try await group.reduce(into: [Int: (URL, Data)]()) { all, hit in if let hit { all[hit.0] = (hit.1, hit.2) } }
+        }
         var images: [ArtworkImage] = [], icon: Data?
-        for kind in Self.kinds {
-            let found: [Art] = try await list("/\(kind.path)/game/\(game.id)?\(kind.query)")
-            guard let url = found.lazy.compactMap({ Self.imageURL($0.url) }).first, let bytes = await download(url) else { continue }
+        for (i, kind) in Self.kinds.enumerated() {
+            guard let (url, bytes) = found[i] else { continue }
             if let assetType = kind.assetType {
                 images.append(ArtworkImage(assetType: assetType, ext: url.pathExtension.lowercased().replacingOccurrences(of: "jpeg", with: "jpg"), data: bytes.base64EncodedString()))
             } else {
