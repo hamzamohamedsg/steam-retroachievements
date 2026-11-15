@@ -99,6 +99,12 @@
       if (steamUI.achStore === undefined) steamUI.achStore = steamUI.findExport((v) => v && typeof v === "object" && "m_mapMyAchievements" in v);
       return steamUI.achStore;
     },
+    // Steam's react-query client: every achievements view reads its cache (docs/steam-internals.md Q20).
+    queries: undefined,
+    queryClient: () => {
+      if (steamUI.queries === undefined) steamUI.queries = steamUI.findExport((v) => v && typeof v === "object" && typeof v.getQueryCache === "function" && typeof v.defaultQueryOptions === "function");
+      return steamUI.queries;
+    },
     // Steam's MobX `observable` (export names change per build; its shape doesn't).
     mobxObservable: undefined,
     observable: () => {
@@ -203,31 +209,22 @@
   .sra-row select { max-width: 170px; }
   /* Steam-classed panel: only what Steam's classes leave to unlisted helpers (docs/steam-internals.md Q13). */
   :where(.sra-h2) { margin: 0; font: unset; }
-  /* AllAchieved's room for the ribbon; Big Picture loads Highlight's padding after it, which put the ribbon over the text. */
-  .sra-perfect[data-sra] { padding-inline-start: 46px; }
-  .sra-iconrow { width: 100%; height: 100%; display: flex; flex-direction: row; } .sra-iconrow > div { height: 100%; }
   .sra-hc img { outline: 2px solid #e5b143; outline-offset: -2px; }  /* RetroAchievements' gold frame for hardcore unlocks (the img is positioned, so it'd cover its wrapper's outline) */
-  .sra-li { margin-bottom: 8px; }
   .sra-info { display: flex; flex-direction: column; gap: 12px; padding: 16px; font-size: 13px; color: #c6d4df; }
   .sra-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 0; }
   .sra-info dt { color: #8b929b; } .sra-info dd { margin: 0; color: #fff; }
   .sra-info .sra-notice { margin: 0; }
   .sra-info .sra-actions { margin: 0; }
   .sra-message { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
-  .sra-close svg { width: 100%; height: 100%; }
   .sra-stat { cursor: pointer; }
   .sra-btn.sra-addgames { margin-left: 8px; background: none; color: #8b929b; font-size: 12px; padding: 4px 6px; }
   .sra-btn.sra-addgames:hover { background: none; color: #fff; }
   /* Steam's focus ring comes from its React Focusable, which our items don't have; this stands in for it. */
   .sra-carousel .sra-item { cursor: pointer; } .sra-item:focus { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; }
-  /* Steam's own overlay windows: hardcore unlocks (marked by feedSteam) and the set switcher. */
+  /* Steam's own achievements views: hardcore unlocks (marked by feedSteam). */
   img[src$="#hardcore"] { outline: 2px solid #e5b143; outline-offset: -2px; }
-  .sra-sets { display: flex; align-items: center; gap: 12px; height: 100%; }
-  .sra-sets .sra-carousel { display: flex; gap: 8px; }
   /* Steam's own menu classes draw the rest; it sits inside the tab, so it has to cover the window itself. */
   .sra-menu[data-sra] { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.7); }
-  .sra-set { background: none; border: 0; padding: 0; cursor: pointer; opacity: 0.45; } .sra-set:hover, .sra-set.sra-shown { opacity: 1; }
-  .sra-set img { display: block; width: 36px; height: 36px; border-radius: 2px; }
   .sra-missable { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 2px; background: rgba(229, 181, 13, 0.18); color: #e5b50d; font-size: 11px; line-height: 16px; }
   :has(> .sra-missable-mark) { position: relative; }
   .sra-missable-mark { position: absolute; top: 0; right: 0; width: 14px; height: 14px; border-radius: 0 0 0 3px; background: #e5b50d; color: #000; font-size: 11px; font-weight: 700; line-height: 14px; text-align: center; }
@@ -266,6 +263,13 @@
     hover: () => steamUI.classes("HoverPositionOuter", "HoverPosition"),
     hoverBg: () => steamUI.classes("AppDetailsHover", "BlurContainer"),
     notice: () => steamUI.classes("OfflineButton", "InnerContainer", "Body"),
+    bar: () => steamUI.classes("CompletedCallout", "Unlocked", "Dimmed"),
+    award: () => steamUI.classes("GroupAchievementRibbon", "CompletionAward"),
+    // Steam's design-system atoms, which take their values from inline CSS variables.
+    flex: () => steamUI.classes("Flex", "Direction", "Gap"),
+    grid: () => steamUI.classes("Grid", "Columns", "Areas"),
+    box: () => steamUI.classes("Width", "MinHeight", "ZIndex"),
+    text: () => steamUI.classes("Text", "TextSize-2", "Truncate"),
   };
   const steamButton = "DialogButton _DialogLayout Secondary Focusable";
   // RetroAchievements counts hardcore and softcore unlocks apart: each unlock says which, and hardcore icons get RA's gold frame.
@@ -277,6 +281,20 @@
   const achievementURL = (r) => `https://retroachievements.org/achievement/${r.id}`;
   // Big Picture (and the Deck's Game Mode) gets Steam's own browser: a desktop browser opened by the app wouldn't show there.
   const openRA = safe((url) => current?.bpm ? SteamClient.URL.ExecuteSteamURL(`steam://openurl/${url}`) : call("openURL", { url }));
+
+  // The game's own set, then its subsets: Steam's achievement sets (Q20). A subset counts toward the totals once something in it
+  // is unlocked, the way a Steam DLC set only counts for players who have the DLC: mastering the game alone still reads 100%.
+  const setsOf = (p) => [p, ...(p.subsets ?? []).filter((sp) => sp.state === "matched")];
+  const earnedIn = (sp) => sp.achievements.filter((r) => r.unlocked).length;
+  const counted = (p) => setsOf(p).filter((sp, i) => i === 0 || earnedIn(sp) > 0);
+  const percent = (n, of) => !of ? 0 : n === of ? 100 : Math.min(99, Math.round(n * 100 / of));
+  // Steam's own achievements page (View My Achievements), which draws what feedSteam gave it.
+  const openPage = safe(() => {
+    if (!current) return;
+    hideCard();
+    const path = `/library/app/${current.appid}/achievements/my/individual`;
+    current.bpm ? SteamUIStore.Navigate(path) : MainWindowBrowserManager.m_history.push(path);
+  });
 
   const showCard = (doc, target, row) => {
     hideCard();
@@ -357,80 +375,72 @@
       el(doc, "div", { class: c(D, "AppDetailsSectionContainer", ...containerKeys) + " Panel" }, ...content));
   };
 
-  const iconOf = (doc, row) => el(doc, "div", { class: c(K.ach(), "AchievementHoverContainer") + " Panel sra-stat",
+  const iconOf = (doc, row, extra = "") => el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + extra + " sra-stat" + hc(row),
       onmouseenter: (e) => showCard(doc, e.currentTarget, row), onmouseleave: hideCard, onclick: () => openRA(achievementURL(row)) },
-    el(doc, "div", { class: c(K.icon(), "AchievementIconWrapper") + " " + c(K.ach(), "Icon") + hc(row) }, el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" })),
-    missableMark(doc, row));
+    el(doc, "img", { class: c(K.icon(), "Icon"), src: row.badgeURL, alt: "" }), missableMark(doc, row));
 
-  // One clickable icon per subset (RetroAchievements lists each as its own game); it opens that subset's achievements page.
-  const subsetName = (sp) => /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
-  const subsetRow = (doc, p, divider) => {
-    const A = K.ach(), I = K.icon();
-    const items = p.subsets.map((sp) => {
-      const name = subsetName(sp);
-      const earned = sp.achievements.filter((r) => r.unlocked).length;
-      return el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", "Achieved") + " Panel sra-subset", title: `${name}: ${earned} of ${sp.achievements.length}`, onclick: () => openAll(sp) },
-        el(doc, "div", { class: c(I, "AchievementIconWrapper") + " " + c(A, "Icon") }, el(doc, "img", { class: c(I, "Icon"), src: sp.game.iconURL, alt: "" }))));
-    });
-    return el(doc, "div", { class: c(A, "UnachievedSection") + (divider ? " " + c(A, "ShowDivider") : "") },
-      el(doc, "div", { class: c(A, "Label") }, "Subsets"), el(doc, "div", { class: c(A, "Additional") }, el(doc, "div", { class: "sra-iconrow" }, items)));
-  };
-
-  // "Locked Achievements"-style row: as many icons as fit, the rest as "+N" (filled in once it's on screen and has a width).
-  const iconRow = (doc, label, rows, achieved, divider, p) => {
-    const A = K.ach(), wrap = el(doc, "div", { class: "sra-iconrow" });
-    const item = (row) => el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", achieved ? "Achieved" : "NotAchieved") + " Panel" }, iconOf(doc, row)));
-    const remainder = (n) => el(doc, "div", {}, el(doc, "div", { class: c(A, "AdditionalItem", "RemainderContainer") + " Panel", onclick: () => openAll(p) },
-      el(doc, "div", { class: c(A, "Remainder") }, el(doc, "div", { class: c(A, "RemainderText") }, "+", String(n)))));
-    const node = el(doc, "div", { class: c(A, "UnachievedSection") + (divider ? " " + c(A, "ShowDivider") : "") },
-      el(doc, "div", { class: c(A, "Label") }, label), el(doc, "div", { class: c(A, "Additional") }, wrap));
-    node.sraFit = () => {
-      wrap.replaceChildren(...rows.map(item));
-      const kids = [...wrap.children], step = kids.length > 1 ? kids[1].offsetLeft - kids[0].offsetLeft : kids[0]?.offsetWidth;
-      const fit = step ? Math.max(1, Math.floor(wrap.clientWidth / step)) : rows.length;
-      if (rows.length > fit) wrap.replaceChildren(...rows.slice(0, fit - 1).map(item), remainder(rows.length - fit + 1));
+  // Steam's icon row: as many icons as fit on one line, the rest as a "+ N" tile (filled in once it's on screen and has a width).
+  const ICON = 48, ICON_GAP = 4;  // Steam's --icon-size here, and --spacing-1
+  const iconGrid = (doc) => el(doc, "div", { class: c(K.grid(), "Columns", "Rows", "Gap", "Grid") + " " + c(K.ach(), "IconRow") + " sra-iconrow",
+    style: `--grid-columns: repeat(auto-fill, var(--icon-size)); --grid-rows: repeat(1, var(--icon-size)); --grid-gap: var(--spacing-1); --icon-size: ${ICON}px;` });
+  const iconRow = (doc, rows) => {
+    const X = K.box(), F = K.flex(), T = K.text(), row = iconGrid(doc);
+    const more = (n) => el(doc, "div", { class: c(X, "Width", "Height", "FlexShrink", "Border", "BorderColor", "TextAlign") + " " + c(F, "Direction", "Justify", "Flex") + " sra-stat", onclick: openPage,
+        style: "--width: var(--icon-size); --height: var(--icon-size); --flex-shrink: 0; --border-color: var(--color-dull-9); --text-align: center; --direction: column; --justify: space-around;" },
+      el(doc, "span", { class: c(T, "TextWeight", "TextSize-4", "Text"), style: "--text-weight: var(--font-weight-heavy); --text-color: var(--color-text-body-title);" }, `+ ${n}`));
+    row.sraFit = () => {
+      const fit = Math.max(1, Math.floor((row.clientWidth + ICON_GAP) / (ICON + ICON_GAP)));
+      row.replaceChildren(...(rows.length > fit ? [...rows.slice(0, fit - 1).map((r) => iconOf(doc, r)), more(rows.length - fit + 1)] : rows.map((r) => iconOf(doc, r))));
     };
-    return node;
+    return row;
   };
 
-  // Steam's perfect-game ribbon (its full-colour achievement icon).
-  const RIBBON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"><path stroke="url(#sra-ribbon-stroke)" fill="url(#sra-ribbon-fill)" stroke-width="1.5" d="M10.1777 10.0258L10.3929 9.80693V9.49999V5.52777H14.2857H14.6001L14.8205 5.30358L18 2.06976L21.1795 5.30358L21.3999 5.52777H21.7143H25.6071V9.50001V9.80696L25.8223 10.0258L28.5553 12.8055L25.8223 15.5853L25.6071 15.8041V16.1111V20.0833H21.7143H21.3999L21.1795 20.3075L18 23.5413L14.8205 20.3075L14.6001 20.0833H14.2857H10.3929V16.1111V15.8042L10.1777 15.5853L7.44464 12.8055L10.1777 10.0258ZM14.7399 28.0317L11.56 33.4221L9.85164 29.9469L9.6456 29.5278H9.17857H6.29474L8.68445 25.3611H12.1142L14.7399 28.0317ZM26.8214 29.5278H26.3544L26.1484 29.9469L24.44 33.4221L21.2601 28.0317L23.8858 25.3611H27.3155L29.7053 29.5278H26.8214Z"></path><circle stroke="#FFAB2C" fill="#FFC82C" cx="18" cy="13" r="5.5"></circle><defs><linearGradient id="sra-ribbon-fill" x1="7.08" y1="3.72" x2="33.6694" y2="25.0697" gradientUnits="userSpaceOnUse"><stop stop-color="#0056D6"></stop><stop offset="1" stop-color="#1A9FFF"></stop></linearGradient><linearGradient id="sra-ribbon-stroke" x1="7.08" y1="3.72" x2="33.6694" y2="25.0697" gradientUnits="userSpaceOnUse"><stop stop-color="#0056D6"></stop><stop offset="1" stop-color="#1A9FFF"></stop></linearGradient></defs></svg>';
-  const ribbon = (doc, cls) => {
-    const t = doc.createElement("template");
-    t.innerHTML = RIBBON_SVG;
-    t.content.firstChild.setAttribute("class", cls);
-    return t.content.firstChild;
+  // One icon per subset (RetroAchievements lists each as its own game). A started one is an achievement set on Steam's page;
+  // Steam lists nothing for one that isn't, so that icon opens the subset on RetroAchievements.
+  const subsetName = (sp) => /\[Subset - ([^\]]+)\]/.exec(sp.game?.title ?? "")?.[1] ?? sp.game?.title ?? "Subset";
+  const subsetRow = (doc, p) => {
+    const I = K.icon(), row = iconGrid(doc);
+    row.append(...p.subsets.map((sp) => el(doc, "div", { class: c(I, "AchievementIconWrapper") + " sra-stat", title: `${subsetName(sp)}: ${earnedIn(sp)} of ${sp.achievements.length}`, onclick: () => earnedIn(sp) ? openPage() : openRA(sp.game.raURL) },
+      el(doc, "img", { class: c(I, "Icon"), src: sp.game.iconURL, alt: "" }))));
+    return row;
   };
 
-  // "You've unlocked 3/35 (8%)" over a progress bar; a perfect set gets Steam's gold highlight and ribbon.
+  // Steam's "set complete" trophy.
+  const AWARD_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 24" fill="none"><defs><linearGradient id="sra-award" x1="7.8579" y1="14.3641" x2="7.8579" y2="25.1901" gradientUnits="userSpaceOnUse"><stop offset="0.168269" stop-color="#1A9FFF"></stop><stop offset="1" stop-color="#1465CF"></stop></linearGradient></defs><g><path fill-rule="evenodd" clip-rule="evenodd" fill="url(#sra-award)" d="M13.48 23.2439V23.8926H2.23582V23.2439H13.48ZM12.637 22.3516H3.07869V23.2439H12.637V22.3516ZM9.24241 21.1553H11.0107L13.0475 16.1082H11.3176L9.24241 17.4056L9.24348 21.1553L9.24241 21.1553Z"></path><path fill="url(#sra-award)" d="M6.47385 21.1553H4.70556L2.66825 16.1082H4.80856L6.47385 17.4056V21.1553Z"></path><path fill-rule="evenodd" clip-rule="evenodd" fill="#1A9FFF" d="M10.0846 2.33648H13.3393V5.59121L15.5688 7.89135L13.3393 10.1915V13.4462H10.0846L7.78442 15.6758L5.48428 13.4462H2.22955V10.1915L0 7.89135L2.22955 5.59121V2.33648H5.48428L7.78442 0.106934L10.0846 2.33648ZM9.06155 4.80929C8.45205 4.55683 7.78095 4.49061 7.1339 4.61924C6.48675 4.74797 5.89221 5.066 5.42563 5.53257C4.95906 5.99914 4.64104 6.59368 4.51231 7.24084C4.38367 7.88789 4.4499 8.55898 4.70236 9.16848C4.95484 9.77777 5.38229 10.2985 5.93062 10.665C6.47925 11.0316 7.12458 11.2275 7.78442 11.2275C8.2228 11.2285 8.65743 11.1429 9.06263 10.9756C9.46772 10.8083 9.83546 10.5622 10.1454 10.2523C10.4553 9.94239 10.7013 9.57465 10.8686 9.16957C11.036 8.76436 11.1216 8.32974 11.1206 7.89135C11.1206 7.23152 10.9246 6.58619 10.558 6.03756C10.1916 5.48922 9.67084 5.06177 9.06155 4.80929Z"></path></g></svg>';
+
+  // "You've unlocked 3/35 (9%)" over Steam's progress bar: a segment per set, and a trophy for each set completed (up to 3, like Steam).
   const progressHighlight = (doc, p) => {
-    const A = K.ach(), D = K.details(), s = p.summary, perfect = s?.percent === 100;
-    const fill = el(doc, "div", { class: c(A, "AchievementProgress") });
-    fill.style.width = `${s?.percent ?? 0}%`;
-    return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv", ...(perfect ? ["AllAchieved"] : [])) + (perfect ? " sra-perfect" : "") },
-      el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, s.text.replace(/\s*\(\d+%\)$/, "")), " ",
-        el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${s.percent}%)`), s.awardText && ` · ${s.awardText}`] : el(doc, "span", {}, p.message)),
-      s && el(doc, "div", { class: c(A, "AchievementProgressContainer") }, fill),
-      perfect && ribbon(doc, c(A, "Ribbon")),
-      el(doc, "div", { class: c(A, "GlobalStatLabel") }));
+    const A = K.ach(), D = K.details(), F = K.flex(), X = K.box(), W = K.award(), s = p.summary;
+    const sets = s ? counted(p) : [], total = sets.reduce((n, sp) => n + sp.achievements.length, 0), earned = sets.reduce((n, sp) => n + earnedIn(sp), 0);
+    const complete = sets.filter((sp) => earnedIn(sp) === sp.achievements.length).length;
+    const award = (i) => { const n = el(doc, "span", { class: c(W, "CompletionAward", ...(i ? ["Stacked"] : [])), style: `--shine-index: ${i};` }); n.innerHTML = AWARD_SVG; return n; };
+    return el(doc, "div", { class: c(D, "Highlight") + " " + c(A, "HighlightDiv") },
+      el(doc, "div", { class: c(A, "UnlockedLabel") }, s ? [el(doc, "span", {}, `You've unlocked ${earned === total ? "all achievements! " : ""}${earned}/${total}`), " ",
+        el(doc, "span", { class: c(A, "UnlockedLabelPercent") }, `(${percent(earned, total)}%)`), s.awardText && ` · ${s.awardText}`] : el(doc, "span", {}, p.message)),
+      s && el(doc, "div", { class: c(A, "ProgressRow") },
+        complete > 0 && el(doc, "div", { class: c(F, "Direction", "Align", "Gap", "Flex"), style: "--direction: row; --align: center; --gap: var(--spacing-0);" },
+          el(doc, "span", { class: c(W, "CompletionAwardStack"), style: "--award-base: 32px;" }, Array.from({ length: Math.min(complete, 3) }, (_, i) => award(i)))),
+        el(doc, "div", { class: c(A, "ProgressBar") }, el(doc, "div", { class: c(X, "Height", "Radius-lg", "Background", "Overflow") + " " + c(K.grid(), "Columns", "Grid"),
+            style: `--height: 10px; --background: var(--color-dull-1); --overflow: hidden; --grid-columns: ${[...sets.map(earnedIn), total - earned].map((n) => `${n}fr`).join(" ")};` },
+          sets.map(() => el(doc, "div", { class: c(K.bar(), "Unlocked") })), el(doc, "div", {})))));
   };
 
   const achievementsSection = (doc, p) => {
     const A = K.ach(), D = K.details(), s = p.summary;
     const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
-    const highlight = progressHighlight(doc, p);
+    const labelled = (label, row, divider) => el(doc, "div", { class: c(A, "UnachievedSection") + (divider ? " " + c(A, "ShowDivider") : "") }, el(doc, "div", { class: c(A, "Label") }, label), row);
     const rows = [];
     if (unlocked.length) {
       const r = unlocked[0];  // most recent first (PanelBuilder sorts)
-      rows.push(el(doc, "div", { class: c(A, "RightAchievementSection", "Achieved", "Featured") + " Panel" }, iconOf(doc, r),
+      rows.push(el(doc, "div", { class: c(A, "Featured", "RightAchievementSection") + " Panel" }, iconOf(doc, r, c(A, "Icon")),
         el(doc, "div", { class: c(A, "TextSection") }, el(doc, "div", { class: c(A, "Name") }, r.title), el(doc, "div", { class: c(A, "Desc") }, r.description))));
     }
-    if (unlocked.length > 1) rows.push(iconRow(doc, "Unlocked Achievements", unlocked.slice(1), true, true, p));
-    if (locked.length) rows.push(iconRow(doc, "Locked Achievements", locked, false, unlocked.length > 0, p));
-    if (p.subsets?.length) rows.push(subsetRow(doc, p, unlocked.length > 0 || locked.length > 0));
+    if (unlocked.length > 1) rows.push(iconRow(doc, unlocked.slice(1)));
+    if (locked.length) rows.push(labelled("Locked Achievements", iconRow(doc, locked), unlocked.length > 0));
+    if (p.subsets?.length) rows.push(labelled("Subsets", subsetRow(doc, p), unlocked.length > 0 || locked.length > 0));
     const body = s && el(doc, "div", { class: c(D, "Body") }, rows,
-      el(doc, "button", { class: c(K.button(), "AppDetailsButton", "BottomRight") + " " + steamButton, onclick: () => openAll(p) }, "View My Achievements"));
-    return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], highlight, body);
+      el(doc, "button", { class: c(K.button(), "AppDetailsButton", "BottomRight") + " " + steamButton, onclick: openPage }, "View My Achievements"));
+    return section(doc, "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], progressHighlight(doc, p), body);
   };
 
 
@@ -489,38 +499,7 @@
     return [panel, ...buttons];
   };
 
-  // The "Achievements 3/35" stat in the play bar, next to Last Played / Play Time (the in-page bar only, like Steam).
-  const ACHIEVEMENT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"><g fill="currentColor"><path d="M9.64304 9.49988L6.39294 12.8055L9.64304 16.1112V20.8333H14.2858L18.0001 24.6111L21.7143 20.8333H26.3573V16.111L29.6072 12.8055L26.3573 9.50012V4.77777H21.7143L18.0001 1L14.2858 4.77777H9.64304V9.49988ZM22.6432 12.8056C22.6432 15.4136 20.5645 17.5278 18.0004 17.5278C15.4362 17.5278 13.3575 15.4136 13.3575 12.8056C13.3575 10.1976 15.4362 8.08334 18.0004 8.08334C20.5645 8.08334 22.6432 10.1976 22.6432 12.8056Z"></path><path d="M5 30.2778L8.25 24.6111H12.4286L15.6786 27.9167L11.5 35L9.17857 30.2778H5Z"></path><path d="M30.9999 30.2778L27.7499 24.6111H23.5713L20.3213 27.9167L24.4999 35L26.8213 30.2778H30.9999Z"></path></g></svg>';
   const sel = (cls) => "." + CSS.escape((cls ?? "").split(" ")[0]);
-  const playBarStat = (doc, p) => {
-    const B = steamUI.classes("GameStatsSection", "MiniAchievements", "AchievementProgressRow");
-    const bar = B.InPage && [...doc.querySelectorAll(sel(B.Container))].find((n) => n.matches(sel(B.InPage)));
-    const stats = bar?.querySelector(sel(B.GameStatsSection));
-    if (!stats) return null;
-    const earned = p.achievements.filter((r) => r.unlocked).length, total = p.achievements.length;
-    const icon = el(doc, "div", { class: c(B, "GameStatIcon", "AchievementSVG") });
-    icon.innerHTML = ACHIEVEMENT_SVG;
-    const fill = el(doc, "div", { class: c(B, "DetailsProgressBar") });
-    fill.style.width = `${total ? earned * 100 / total : 0}%`;
-    const node = el(doc, "div", { class: c(B, "GameStat", "MiniAchievements") + " sra-stat", "data-sra-panel": "", onclick: () => openAll(p) }, icon,
-      el(doc, "div", { class: c(B, "GameStatRight") }, el(doc, "div", { class: c(B, "PlayBarLabel") }, "Achievements"),
-        el(doc, "div", { class: c(B, "AchievementProgressRow") }, el(doc, "div", { class: c(B, "PlayBarDetailLabel", "AchievementCountLabel") }, `${earned}/${total}`),
-          el(doc, "div", { class: c(B, "DetailsProgressContainer") }, fill))));
-    stats.append(node);
-    // Steam draws its own copy from the details the overlay needs (feedSteam); ours stays, as it opens the achievements page.
-    const hideSteams = () => stats.querySelectorAll(sel(B.MiniAchievements)).forEach((n) => {
-      if (n !== node) { n.style.display = "none"; n.setAttribute("data-sra-hid", ""); }
-    });
-    hideSteams();
-    // Steam adds Last Played and Play Time after ours as they arrive: keep Achievements last, like a Steam game's play bar.
-    const order = new MutationObserver(() => {
-      if (!node.isConnected) return order.disconnect();
-      hideSteams();
-      if (node.nextSibling) stats.append(node);
-    });
-    order.observe(stats, { childList: true });
-    return node;
-  };
 
   // Signing in and choosing the game happen on the desktop library page; Big Picture only says so.
   const messageSection = (doc, p) => section(doc, current?.bpm ? "Achievements" : "RetroAchievements", ["AppDetailsSectionHasLabel", "RightColumnSection"],
@@ -557,9 +536,7 @@
     const p = payload, main = p.game ? achievementsSection(doc, p) : messageSection(doc, p);
     host.prepend(main);
     current.nodes.push(main);
-    main.querySelectorAll(".sra-iconrow").forEach((w) => w.parentElement.parentElement.sraFit?.());  // the subset row shows every icon
-    const stat = p.summary && playBarStat(doc, p);
-    if (stat) current.nodes.push(stat);
+    main.querySelectorAll(".sra-iconrow").forEach((w) => w.sraFit?.());  // the subset row shows every icon
     const left = p.game && steamUI.findClass(doc, "LeftColumn");
     if (left) {
       const notice = K.notice().Body && left.querySelector("." + CSS.escape(K.notice().Body.split(" ")[0]));
@@ -611,14 +588,14 @@
 
   // YOUR STUFF: Steam's Achievements section; unlocked icons, then locked, then one icon per subset. A opens the achievements page.
   const bpmStuff = (doc, p) => {
-    const A = K.ach(), D = K.details(), open = () => openAll(p);
+    const A = K.ach(), D = K.details(), open = openPage;
     const unlocked = p.achievements.filter((r) => r.unlocked), locked = p.achievements.filter((r) => !r.unlocked);
     const label = (text) => el(doc, "h3", { class: c(A, "LockedAchievementsLabel") + " sra-h2" }, text);
     const parts = [];
     if (unlocked.length) parts.push(carousel(doc, unlocked.map((r) => carouselItem(doc, r, open, true, achievementURL(r)))));
     if (locked.length) parts.push(label("Locked Achievements"), carousel(doc, locked.map((r) => carouselItem(doc, r, open, false, achievementURL(r)))));
     if (p.subsets?.length) parts.push(label("Subsets"), carousel(doc, p.subsets.map((sp) => carouselItem(doc, { title: subsetName(sp), description: sp.game?.title ?? "",
-      badgeURL: sp.game?.iconURL, unlocked: true, rarityText: sp.summary?.text ?? sp.message }, () => openAll(sp), true, sp.game?.raURL))));
+      badgeURL: sp.game?.iconURL, unlocked: true, rarityText: sp.summary?.text ?? sp.message }, () => earnedIn(sp) ? open() : openRA(sp.game?.raURL), true, sp.game?.raURL))));
     const first = parts[0].querySelector(".sra-item");
     if (first) detail(first);  // the most recent unlock, before anything has focus
     return section(doc, "Achievements", ["AppDetailsSectionHasLabel", "RightColumnSection"], progressHighlight(doc, p),
@@ -632,7 +609,7 @@
     if (!unlocked.length) return null;
     const ACT = steamUI.classes("AppActivityDay", "EventHeadline"), F = steamUI.classes("ActivityFeedContainer", "Rollup", "FetchMoreContainer");
     const AV = steamUI.classes("avatarHolder", "avatarStatus", "avatarFrame"), N = steamUI.classes("playerName", "statusAndName");
-    const A = K.ach(), I = K.icon(), me = window.friendStore?.m_FriendsUIFriendStore?.self?.persona, open = () => openAll(p);
+    const A = K.ach(), I = K.icon(), me = window.friendStore?.m_FriendsUIFriendStore?.self?.persona, open = openPage;
     const days = [];
     for (const r of unlocked) { const last = days.at(-1); last && last.day === r.unlockedDay ? last.rows.push(r) : days.push({ day: r.unlockedDay, rows: [r] }); }
     // Big Picture: A opens the achievements page and X the achievement's web page; a desktop click opens the web page.
@@ -669,106 +646,6 @@
     doc.body.append(node);
     closeOverlay = close;
     return node;
-  };
-
-  // Steam's achievements page (View My Achievements), over the game page like Steam's own.
-  const openAll = (p) => {
-    const doc = steamUI.doc();
-    if (!doc || !p.game) return;
-    closeOverlay?.();
-    hideCard();
-    const opener = doc.activeElement?.sraNode, nav = [];  // Big Picture: the focused item, to return to on close
-    const O = steamUI.classes("AchievementsOverlayContainer", "AchievementsPageContainer", "CloseButton");
-    const G = steamUI.classes("GamepadPage", "Flexed", "OverflowHidden");
-    const P = steamUI.classes("HeaderContainer", "AchievementTabs", "MyAchievementsHeader");
-    const H = steamUI.classes("StatsBlock", "BigStat", "AchievementSearchHeader");
-    const T = steamUI.classes("GamepadTabbedPage", "TabRow", "TabTitle");
-    const S = steamUI.classes("ScrollPanel", "ScrollY", "ScrollX");
-    const L = steamUI.classes("AchievementListItemBase", "AchievementTitle", "UnlockDate");
-    const PB = steamUI.classes("ProgressBar", "Percent", "Indeterminate", "TimeRemaining");
-    const IM = steamUI.classes("GreyBackground", "Visibility", "Visible");
-    const I = K.icon();
-    const bar = (pct) => {
-      const f = el(doc, "div", { class: c(PB, "Percent") });
-      f.style.width = `${pct}%`;
-      f.style.background = "var(--gpColor-Blue, #1a9fff)";  // Steam sets the colour inline too
-      return el(doc, "div", { class: c(PB, "ProgressBar") }, f);
-    };
-    const total = p.achievements.length, earned = p.achievements.filter((r) => r.unlocked).length, pct = p.summary?.percent ?? 0;
-    const hero = doc.querySelector('img[src*="_hero"]')?.getAttribute("src");
-
-    let tab = "my", query = "";
-    const tabs = [["my", "My Achievements"], ["global", "Global Achievements"]].map(([id, title]) =>
-      el(doc, "div", { class: c(T, "Tab", "RightAddon") + " Panel", "data-tab": id, onclick: () => { tab = id; draw(); } }, el(doc, "span", { class: c(T, "TabTitle") }, title)));
-    const search = el(doc, "input", { class: "DialogInput DialogInputPlaceholder DialogTextInputBase Focusable", placeholder: "Search", type: "text",
-      oninput: () => { query = search.value.trim().toLowerCase(); draw(); } });
-    const list = el(doc, "div", { class: "sra-column" });
-    // A row opens its achievement's RetroAchievements page (click, or A in Big Picture).
-    const row = (r) => el(doc, "div", { class: c(L, "AchievementListItemBase") + " Panel Focusable sra-li sra-item sra-stat", tabindex: "-1",
-        onclick: () => openRA(achievementURL(r)), onfocus: (e) => e.currentTarget.scrollIntoView({ block: "nearest" }) }, el(doc, "div", { class: c(L, "Container") },
-      el(doc, "div", {}, el(doc, "div", { class: c(I, "AchievementIconWrapper") + hc(r) }, el(doc, "img", { class: c(I, "Icon"), src: r.badgeURL, alt: "" }))),
-      el(doc, "div", { class: c(L, "Content") }, el(doc, "div", { class: c(L, "VerticalContent", "AchievementContent") },
-        el(doc, "div", { class: c(L, "AchievementTitle") }, r.title), el(doc, "div", { class: c(L, "AchievementDescription") }, missableTag(doc, r), r.description),
-        el(doc, "div", { class: c(L, "AchievementGlobalPercentage", "InBody") }, [`${r.points} points`, mode(r), tab === "my" && r.rarityText].filter(Boolean).join(" · ")))),
-      el(doc, "div", { class: c(L, "Right") }, el(doc, "div", { class: c(L, "VerticalContent", "AlignEnd") },
-        tab === "global" ? [el(doc, "div", { class: c(L, "ProgressCount") }, r.rarity == null ? "" : `${r.rarity.toFixed(1)}%`), el(doc, "div", { class: c(L, "ProgressBar") }, bar(r.rarity ?? 0))]
-          : r.unlocked ? [el(doc, "div", { class: c(L, "UnlockDate") }, r.unlockedText), el(doc, "div", { class: c(L, "ProgressBar") }, bar(100))] : []))));
-    const draw = () => {
-      tabs.forEach((t) => { t.className = c(T, "Tab", "RightAddon", ...(t.dataset.tab === tab ? ["Selected"] : [])) + " Panel"; });
-      const rows = p.achievements.filter((r) => !query || `${r.title} ${r.description}`.toLowerCase().includes(query));
-      const locked = rows.filter((r) => !r.unlocked);
-      list.replaceChildren(...(tab === "global" ? [...rows].sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0)).map(row)
-        : [...rows.filter((r) => r.unlocked).map(row), ...(locked.length ? [el(doc, "div", { class: c(L, "ListTitle") }, "Locked Achievements")] : []), ...locked.map(row)]));
-      if (!current?.bpm || !node.isConnected) return;
-      unregister();
-      takeFocus(registerNav(doc, node, nav, { [BTN.OK]: "View on RetroAchievements", [BTN.CANCEL]: "Back" })[0]);  // the rows are a column; LB/RB switch tabs, B closes
-    };
-    const unregister = () => { nav.reverse().forEach((fn) => { try { fn(); } catch (_) {} }); nav.length = 0; };
-    // Steam sends the controller's buttons to the focused row; claim the ones that would leave the page behind it.
-    const onPad = safe((e) => {
-      const b = e.detail?.button, items = [...list.querySelectorAll(".sra-item")], at = items.indexOf(doc.activeElement);
-      if (b === BTN.CANCEL) { handled(e); close(); }
-      else if (b === BTN.BUMPER_LEFT || b === BTN.BUMPER_RIGHT) { handled(e); tab = b === BTN.BUMPER_LEFT ? "my" : "global"; draw(); }
-      else if (b === BTN.DIR_LEFT || b === BTN.DIR_RIGHT || (b === BTN.DIR_UP && at <= 0) || (b === BTN.DIR_DOWN && at === items.length - 1)) handled(e);
-    });
-
-    const perfect = total > 0 && earned === total;  // like Steam: PerfectGame header, ribbon and "You've unlocked all achievements!"
-    const header = el(doc, "div", { class: c(P, "HeaderContainer", ...(perfect ? ["PerfectGame"] : [])) + " Panel" }, el(doc, "div", { class: c(H, "Container") }, el(doc, "div", { class: c(H, "Content") },
-      // The game's (or subset's) title opens its RetroAchievements page.
-      el(doc, "div", { class: c(H, "Title") + " sra-stat", title: "View on RetroAchievements", onclick: () => openRA(p.game.raURL) }, el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(H, "GameIcon") },
-        el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: p.game.iconURL, alt: "" })), p.game.title),
-      el(doc, "div", { class: "Panel" }, el(doc, "div", { class: c(H, "StatsBlock") }, el(doc, "div", { class: c(H, "Stat", "BigStat") }, perfect && ribbon(doc, c(H, "Ribbon")),
-        el(doc, "div", { class: c(H, "StatLabelAndValue") },
-          el(doc, "div", { class: c(H, "ProgressLabel") }, el(doc, "div", { class: c(H, "Label") },
-            perfect ? `You've unlocked all achievements! ${earned}/${total}` : `${earned} of ${total} achievements earned`), el(doc, "div", { class: c(H, "Label") }, `(${pct}%)`)),
-          el(doc, "div", { class: c(H, "Progress") }, bar(pct)))))))));
-    const tabbed = el(doc, "div", { class: c(T, "GamepadTabbedPage", "CanBeHeaderBackground") + " Panel" },
-      el(doc, "div", { class: c(T, "TabHeaderRowWrapper", "Pinned") }, el(doc, "div", { class: c(T, "TabRow") }, el(doc, "div", { class: c(T, "TabRowTabs") },
-        el(doc, "div", { class: c(T, "TabsRowScroll") }, el(doc, "div", { class: c(T, "FixCenterAlignScroll") + " Panel" },
-          el(doc, "div", { class: c(T, "TabRowSpacer") }), tabs, el(doc, "div", { class: c(T, "TabRowSpacer") })))))),
-      el(doc, "div", { class: c(T, "TabContents") + " Panel" }, el(doc, "div", { class: "_TabContentsScroll " + c(T, "TabContentsScroll") + " Panel" },
-        el(doc, "div", { class: c(L, "AchievementList") + " " + c(P, "List") + " Panel" },
-        el(doc, "div", { class: c(H, "AchievementSearchHeader") + " " + c(P, "MyAchievementsHeader") + " Panel" }, el(doc, "div", { class: c(H, "LeftContent") }),
-          el(doc, "div", { class: c(H, "SearchField") }, el(doc, "div", { class: "DialogInput_Wrapper _DialogLayout Panel" }, search))),
-        list))));
-    const closeButton = el(doc, "div", { class: c(O, "CloseButton") + " sra-close", onclick: () => close() });
-    closeButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="SVGIcon_Button SVGIcon_X_Line" viewBox="0 0 256 256"><line fill="none" stroke="#FFFFFF" stroke-width="45" x1="212" y1="212" x2="44" y2="44"></line><line fill="none" stroke="#FFFFFF" stroke-width="45" x1="44" y1="212" x2="212" y2="44"></line></svg>';
-    const node = el(doc, "div", { class: c(O, "AppDetailsOverlayTransitionGroup") },
-      el(doc, "div", { class: c(O, "AchievementsOverlayContainer", "OverlayAppDetailsTransitionEntered") },
-        el(doc, "div", { class: c(O, "AchievementsPageContainer") },
-          el(doc, "div", { class: c(G, "GamepadPage", "Flexed", "OverflowHidden") + " Panel" },
-            el(doc, "div", { class: c(P, "Page") + " " + c(S, "ScrollPanel", "ScrollY") + " Panel" },
-              el(doc, "div", { class: c(P, "Background") }, el(doc, "div", { class: c(P, "Blur") }),
-                hero && el(doc, "div", { class: c(IM, "Container", "GreyBackground") + " " + c(P, "HeaderImage") }, el(doc, "img", { class: c(IM, "Image", "Visibility", "Visible"), src: hero, alt: "" }))),
-              el(doc, "div", { class: c(P, "Container") + " Panel" }, header, el(doc, "div", { class: c(P, "AchievementTabs") + " Panel" }, tabbed)))),
-          closeButton)));
-    const onKey = safe((e) => { if (e.key === "Escape") close(); });
-    const close = () => { unregister(); node.remove(); doc.removeEventListener("keydown", onKey, true); closeOverlay = null; takeFocus(opener); };
-    doc.addEventListener("keydown", onKey, true);
-    node.addEventListener("vgp_onbuttondown", onPad);
-    (steamUI.findClass(doc, "AppDetailsMain") ?? doc.body).append(node);
-    closeOverlay = close;
-    draw();
   };
 
   const openChooser = async (consoleId) => {
@@ -1001,80 +878,100 @@
   const applyProgress = (appid) => {
     const r = progress.get(appid), cache = progressCache(), e = cache?.get(appid), last = appStore.GetAppOverviewByAppID(appid)?.rt_last_time_played ?? 0;
     // Steam asks its servers again (they answer 0 for a shortcut) once the last play is newer than cache_time: a tick puts this back.
-    if (!r || !cache || (e?.unlocked === r.unlocked && e?.total === r.total && e.cache_time >= last)) return;
+    if (!r || !cache || (e?.unlocked === r.unlocked && e?.total === r.total && e.groups_total_base === 1 && e.cache_time >= last)) return;
+    // groups_*: the game's own set is Steam's "base game" set; completing it puts Steam's trophy on the tile (Q20).
+    const all = r.total > 0 && r.unlocked === r.total;
     cache.set(appid, { appid, unlocked: r.unlocked, total: r.total, percentage: r.total ? r.unlocked * 100 / r.total : 0,
-      all_unlocked: r.total > 0 && r.unlocked === r.total, cache_time: Math.max(last, Math.floor(Date.now() / 1000)), vetted: true });
+      all_unlocked: all, cache_time: Math.max(last, Math.floor(Date.now() / 1000)), vetted: true,
+      groups_completed_base: all ? 1 : 0, groups_total_base: 1, groups_completed_dlc: 0, groups_total_dlc: 0, base_game_total: r.total });
   };
   const setProgress = (appid, r) => { progress.set(appid, { unlocked: r.unlocked, total: r.total }); applyProgress(appid); };
   // Steam answers for the shortcut itself again.
   const forgetProgress = (appid) => { progress.delete(appid); progressCache()?.delete(appid); };
-  // A matched game's achievements go into Steam's own stores too, so the in-game overlay draws them like a Steam game's:
-  // the toolbar's Achievements button and window, and recent unlocks in Game Overview (docs/steam-internals.md Q16).
-  const steamAchievements = new Map();  // appid → details.achievements (the main set)
-  const steamSets = new Map();  // appid → { payload, shown: RA game id of the set in Steam's window }
-  // The URL fragment marks hardcore unlocks for CSS_TEXT's gold frame; Steam has no field for it.
-  const toRows = (sp) => sp?.state !== "matched" ? [] : sp.achievements.map((r) => ({ strID: String(r.id), strName: r.title, strDescription: (r.missable ? "Missable: " : "") + r.description,
+  // A matched game's achievements go into Steam's own stores too, so Steam draws them like a Steam game's: its achievements
+  // page, the overlay's Achievements button and window, the play bar's count (docs/steam-internals.md Q16, Q20).
+  const steamAchievements = new Map();  // appid → details.achievements (the main set): what the overlay and Game Mode menus check
+  const describe = (r) => `${r.missable ? "Missable: " : ""}${r.description} (${r.points} ${r.points === 1 ? "point" : "points"})`;
+  const toRows = (sp) => sp?.state !== "matched" ? [] : sp.achievements.map((r) => ({ strID: String(r.id), strName: r.title, strDescription: describe(r),
     bAchieved: r.unlocked, rtUnlocked: r.unlockedAt ?? 0, strImage: r.badgeURL + (r.unlocked && r.hardcore ? "#hardcore" : ""), bHidden: false,
     flMinProgress: 0, flCurrentProgress: 0, flMaxProgress: 0, flAchieved: r.rarity ?? 0 }));
-  const setsOf = (p) => [p, ...(p.subsets ?? []).filter((sp) => sp.state === "matched")];
+  // Steam's achievements views read three cached queries per game. A shortcut's hold Steam's empty answers: ours replace them,
+  // with the subsets as achievement sets. The URL fragment marks hardcore unlocks for CSS_TEXT's gold frame; Steam has no field for it.
+  const seeded = new Map();  // appid → { payload, entries: [[queryKey, data]] }
+  const seedOf = (appid, p, steamid) => {
+    const sets = setsOf(p), rows = sets.flatMap((sp) => sp.achievements), key = ["achievements", appid];
+    const icon = (r, locked) => r.badgeURL.replace(/(_lock)?\.png$/, locked ? "_lock.png" : ".png") + (!locked && r.unlocked && r.hardcore ? "#hardcore" : "");
+    return [
+      [[...key, "schema"], { appid, language: "english", schema_hash: 1, schema_version: 1, groups: sets.map((sp, g) => ({
+        id: g, name: g ? `${subsetName(sp)} subset` : "", archived: false, ispublic: true, developeronly: false, dlcappid: 0, order: g,
+        achievements: sp.achievements.map((r) => ({ internal_key: r.id, api_name: String(r.id), name: r.title, description: describe(r), hidden: false, archived: false,
+          icon_achieved: icon(r, false), icon_unachieved: icon(r, true), groupid: g, min_progress: 0, max_progress: 0 })) })) }],
+      [[...key, "globalpercentages"], { percentages: Object.fromEntries(rows.map((r) => [r.id, r.rarity ?? 0])) }],
+      [[...key, "user_achievements", steamid], { appid, steamid, schema_hash: 1,
+        achievements: Object.fromEntries(rows.map((r) => [r.id, { internal_key: r.id, unlocked: r.unlocked, unlock_time: r.unlockedAt ?? 0, progress: 0 }])),
+        // is_achievable: whether the set counts. Steam shows one that doesn't as a bare heading, without its locked achievements.
+        groups: Object.fromEntries(sets.map((sp, g) => {
+          const done = earnedIn(sp), complete = done > 0 && done === sp.achievements.length;
+          return [g, { groupid: g, is_achievable: g === 0 || done > 0, completed_achievements: done, is_completed: complete,
+            time_completed: complete ? Math.max(...sp.achievements.map((r) => r.unlockedAt ?? 0)) : 0 }];
+        })) }],
+    ];
+  };
+  // Each tick: Steam drops an unwatched entry after 5 minutes and restores its own answer at startup, so ours go back in.
+  const applySeed = (appid) => {
+    const qc = steamUI.queryClient();
+    for (const [queryKey, data] of qc ? seeded.get(appid)?.entries ?? [] : []) {
+      const q = qc.getQueryCache().build(qc, qc.defaultQueryOptions({ queryKey, gcTime: Infinity }));
+      if (q.state.data === data) continue;
+      q.cancel({ silent: true });  // Steam's own request, which would land on top of ours
+      // setState, not setQueryData: Steam saves "success" updates to its disk cache, and ours don't belong there.
+      // Dated far ahead, so Steam never finds it stale and asks its servers again; a new date makes its summaries recompute.
+      q.setState({ data, status: "success", fetchStatus: "idle", error: null, dataUpdatedAt: Date.now() + 1e12 });
+    }
+  };
+  // Steam answers for the shortcut itself again.
+  const unseed = (appid) => { if (seeded.delete(appid)) steamUI.queryClient()?.removeQueries({ queryKey: ["achievements", appid] }); };
+  // Steam hides the overlay toolbar's Achievements button for every shortcut; one with RA achievements gets it back.
+  // The button's rule sits in a lookup Steam exports only as a function, found by its source.
+  let toolbarButton = null;  // { def, visible }: Steam's rule, put back on dispose
+  const hookToolbarButton = () => {
+    if (toolbarButton) return;
+    toolbarButton = {};
+    const lookup = /^function \w+\(\w+\)\{const \w+=\w+\[\w+\];return typeof \w+=="function"\?\w+\(\):\w+\}$/;
+    let def = null;
+    steamUI.findExport((v) => {
+      if (typeof v !== "function" || v.length !== 1 || !lookup.test(String(v))) return false;
+      try { const d = v("Achievements"); if (d?.tooltipToken === "#AppOverlay_Toolbar_Achievements" && typeof d.buttonVisible === "function") def = d; } catch (_) {}
+      return !!def;
+    });
+    if (!def) return log("error", "Steam's overlay Achievements button not found");
+    const visible = def.buttonVisible.sraOriginal ?? def.buttonVisible;
+    def.buttonVisible = (app, ...rest) => visible(app, ...rest) || steamAchievements.get(app?.appid)?.nTotal > 0;
+    def.buttonVisible.sraOriginal = visible;
+    toolbarButton = { def, visible };
+  };
   const feedSteam = (appid, p) => {
     const store = steamUI.achievementStore();
-    if (!store || p?.state === "error") return;  // a failed fetch keeps what the overlay already shows
-    const main = toRows(p);
-    if (!main.length && !steamAchievements.has(appid)) return;
-    const split = (rows) => [rows.filter((r) => r.bAchieved), rows.filter((r) => !r.bAchieved)];
+    if (!store || p?.state === "error") return;  // a failed fetch keeps what Steam already shows
+    const steamid = window.App?.m_CurrentUser?.strSteamID, main = steamid ? toRows(p) : [];  // the queries are kept per Steam account
+    if ((!main.length && !steamAchievements.has(appid)) || seeded.get(appid)?.payload === p) return;
+    const achieved = main.filter((r) => r.bAchieved), unachieved = main.filter((r) => !r.bAchieved);
     const byID = (list) => Object.fromEntries(list.map((r) => [r.strID, r]));
-    // Steam's window shows one set at a time: the main set, or the subset picked with setSwitcher.
-    const info = steamSets.get(appid) ?? {};
-    steamSets.set(appid, Object.assign(info, { payload: p, shown: main.length ? (setsOf(p).find((sp) => sp.game.id === info.shown) ?? p).game.id : null }));
-    const rows = main.length ? toRows(setsOf(p).find((sp) => sp.game.id === info.shown)) : [];
-    if (rows.length) {
-      const [achieved, unachieved] = split(rows);
+    if (main.length) {
+      hookToolbarButton();
+      seeded.set(appid, { payload: p, entries: seedOf(appid, p, steamid) });
+      applySeed(appid);
+      // The old store: the overlay's Game Overview still lists recent unlocks from it.
       store.m_mapMyAchievements.set(appid, { data: { achieved: byID(achieved), unachieved: byID(unachieved), hidden: {} } });
-      store.m_mapGlobalAchievements.set(appid, { data: Object.fromEntries(rows.map((r) => [r.strID, r.flAchieved])) });
+      store.m_mapGlobalAchievements.set(appid, { data: Object.fromEntries(main.map((r) => [r.strID, r.flAchieved])) });
     } else {
+      unseed(appid);
       store.m_mapMyAchievements.delete(appid);
       store.m_mapGlobalAchievements.delete(appid);
     }
-    const [achieved, unachieved] = split(main);
     steamAchievements.set(appid, { nTotal: main.length, nAchieved: achieved.length, vecHighlight: achieved, vecUnachieved: unachieved, vecAchievedHidden: [] });
     applyDetails(appid);
     setProgress(appid, { unlocked: achieved.length, total: main.length });
-  };
-  // The game's icon and each subset's (Bonus, Time Attack…), left of the window's Search: one switches the list to its set.
-  // Click or Enter; A on a controller in Game Mode.
-  const setSwitcher = (doc, appid, info) => {
-    const sets = setsOf(info.payload);
-    const label = el(doc, "span", { class: "sra-muted" });
-    const items = sets.map((sp, i) => el(doc, "button", { class: "sra-set sra-item", title: i ? `${subsetName(sp)} subset` : sp.game.title,
-      onclick: () => { info.shown = sp.game.id; feedSteam(appid, info.payload); paint(); } }, el(doc, "img", { src: sp.game.iconURL, alt: "" })));
-    const paint = () => sets.forEach((sp, i) => {
-      items[i].classList.toggle("sra-shown", sp.game.id === info.shown);
-      if (sp.game.id === info.shown) label.textContent = i ? `${subsetName(sp)} subset` : sp.game.title;
-    });
-    paint();
-    const node = el(doc, "div", { class: "sra-sets" }, el(doc, "div", { class: "sra-carousel" }, items), label);
-    node.sraPayload = info.payload;
-    node.sraCleanups = [];
-    return node;
-  };
-  const ensureSetSwitcher = (doc, appid, controller) => {
-    const info = steamSets.get(appid), H = steamUI.classes("StatsBlock", "BigStat", "AchievementSearchHeader");
-    if (!info?.shown || setsOf(info.payload).length < 2 || !H.LeftContent) return;
-    for (const slot of doc.querySelectorAll(sel(H.LeftContent))) {
-      if (slot.hasAttribute("data-sra")) continue;  // our own achievements page (openAll) has one too
-      const old = slot.querySelector(".sra-sets");
-      if (old?.sraPayload === info.payload) {
-        // Steam registers the page's focus tree after it draws: join it then.
-        if (controller && !old.querySelector(".sra-item")?.sraNode) registerNav(doc, old, old.sraCleanups, { [BTN.OK]: "Show achievements" });
-        continue;
-      }
-      old?.sraCleanups.forEach((fn) => { try { fn(); } catch (_) {} });
-      const node = setSwitcher(doc, appid, info);
-      ensureStyle(doc);
-      old ? old.replaceWith(node) : slot.append(node);
-      if (controller) registerNav(doc, node, node.sraCleanups, { [BTN.OK]: "Show achievements" });
-    }
   };
   const loadForOverlay = safe(async (appid, method) => {
     const shortcut = await steamUI.shortcut(appid);
@@ -1220,14 +1117,13 @@
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     steamAchievements.forEach((_, id) => applyDetails(id));
     progress.forEach((_, id) => applyProgress(id));  // Steam's own reply can land after ours
+    seeded.forEach((_, id) => applySeed(id));
     syncAllGames();
     // A shortcut's in-game overlay: its game's achievements when the game starts, fresh ones each time the overlay opens.
     const overlayWindows = SteamUIStore.WindowStore?.OverlayWindows ?? [];
     if (overlayWindows.length) overlayDocs().forEach(ensureStyle);  // the hardcore frame, in the overlay and the windows it opens
     for (const w of overlayWindows) {
       const appid = w.params?.appid, open = !!w.m_DesktopOverlay?.overlay_active, seen = overlays.has(w);
-      const achievementsDoc = w.m_DesktopOverlay?.GetPopupForWindow?.("Achievements")?.document;
-      if (appid && achievementsDoc) ensureSetSwitcher(achievementsDoc, appid, false);  // the desktop overlay: mouse and keyboard
       if (!appid || (seen && overlays.get(w) === open) || !steamUI.isShortcut(appid)) continue;
       overlays.set(w, open);
       if (!seen || open) loadForOverlay(appid, seen ? "refreshPanel" : "getPanel");
@@ -1241,7 +1137,7 @@
       if (inGame && steamUI.isShortcut(inGameApp)) loadForOverlay(inGameApp, "refreshPanel");
     }
     const gamepadDoc = gamepad?.BrowserWindow?.document;
-    if (inGame && gamepadDoc) { ensureStyle(gamepadDoc); ensureSetSwitcher(gamepadDoc, inGameApp, true); }
+    if (inGame && gamepadDoc) ensureStyle(gamepadDoc);
     const surface = steamUI.surface();
     if (!surface) return;
     const doc = surface.doc;
@@ -1256,8 +1152,10 @@
       closeOverlay?.();
       current = appid && steamUI.isShortcut(appid) ? { appid, bpm: surface.bpm, shortcut: null, payload: null } : null;
       if (current) load(appid, "getPanel");
-    } else if (current?.payload && current.payload.state !== "hidden" && (current.nodes?.some((n) => !n.isConnected) || (current.bpm ? current.tab !== bpmTab(doc) : !current.nodes?.length))) {
-      // Steam re-rendered the page and dropped our node, Big Picture switched tabs, or the reply came before the page had drawn
+    } else if (current?.payload && current.payload.state !== "hidden" && !/\/achievements\//.test(surface.route)
+      && (current.nodes?.some((n) => !n.isConnected) || (current.bpm ? current.tab !== bpmTab(doc) : !current.nodes?.length))) {
+      // Steam re-rendered the page and dropped our node, Big Picture switched tabs, or the reply came before the page had drawn.
+      // Not on Steam's achievements page, which takes the game page's place in Big Picture.
       render(current.payload);
     }
     if (pendingOpen && !surface.bpm) { const open = pendingOpen; pendingOpen = null; open(); }
@@ -1347,12 +1245,10 @@
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
       for (const id of steamAchievements.keys()) feedSteam(id, null);
       for (const id of progress.keys()) forgetProgress(id);
+      if (toolbarButton?.def) toolbarButton.def.buttonVisible = toolbarButton.visible;
       optionsDoc?.removeEventListener("vgp_onbuttondown", onLibraryPad, true);
       if (allGames) { allGames.extra.set([]); allGames.computed.derivation = allGames.derivation; allGames.proto.BIsShortcut = allGames.isShortcut; }
-      overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra], .sra-sets").forEach((n) => {
-        n.sraCleanups?.forEach((fn) => { try { fn(); } catch (_) {} });
-        n.remove();
-      }));
+      overlayDocs().forEach((d) => d.querySelectorAll("style[data-sra]").forEach((n) => n.remove()));
       try { lifetime?.unregister?.(); } catch (_) {}
       closeOverlay?.();
       removePanel();

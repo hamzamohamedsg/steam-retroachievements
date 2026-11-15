@@ -82,7 +82,7 @@ func installed(cores: [String]) -> Installed {
     #else
     let expectedCore = item.coreFile!
     #endif
-    #expect(s.launchOptions.hasSuffix("gameoverlayrenderer.dylib\" \"/A/RetroArch\" -L \"\(expectedCore)\" \"/r/snes/Super Mario World (USA).sfc\""))
+    #expect(s.launchOptions.hasSuffix("gameoverlayrenderer.dylib\" \"/A/RetroArch\" -f -L \"\(expectedCore)\" \"/r/snes/Super Mario World (USA).sfc\""))
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions)?.romPath == "/r/snes/Super Mario World (USA).sfc")
     #expect(s.bundle == "/A/RetroArch")
     #expect(s.name == "Super Mario World")
@@ -99,7 +99,7 @@ func installed(cores: [String]) -> Installed {
     let item = ScanItem(romPath: "/r/nes/a.nes", title: "a", consoleId: 7, emulator: .retroarch, coreFile: "/c/mesen_libretro.so", status: .ready)
     let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: false)
     #expect(s.exe == "\"/usr/bin/flatpak\"")
-    #expect(s.launchOptions == "run org.libretro.RetroArch -L \"/c/mesen_libretro.so\" \"/r/nes/a.nes\"")
+    #expect(s.launchOptions == "run org.libretro.RetroArch -f -L \"/c/mesen_libretro.so\" \"/r/nes/a.nes\"")
     #expect(s.startDir == "\"/usr/bin/\"" && s.bundle == "/usr/bin/flatpak")
     // The shortcut reads back as the same emulator, core and ROM.
     #expect(EmulatorLaunch.parse(exe: s.exe, launchOptions: s.launchOptions) == EmulatorLaunch(emulator: .retroarch, coreFile: "/c/mesen_libretro.so", romPath: "/r/nes/a.nes"))
