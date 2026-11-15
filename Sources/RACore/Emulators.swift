@@ -64,7 +64,7 @@ public enum Emulator: String, Codable, CaseIterable, Sendable {
 
     public func launchOptions(rom: String, coreFile: String?) -> String {
         switch self {
-        case .retroarch: "-L \"\(coreFile ?? "")\" \"\(rom)\""
+        case .retroarch: "-f -L \"\(coreFile ?? "")\" \"\(rom)\""
         case .duckstation, .pcsx2: "-batch -- \"\(rom)\""
         case .dolphin: "-b -e \"\(rom)\""
         case .ppsspp, .flycast, .skyemu: "\"\(rom)\""
