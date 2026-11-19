@@ -736,7 +736,11 @@
         s.emulators.flatMap((e) => [el(doc, "dt", {}, e.name), el(doc, "dd", {}, e.installed ? "Installed" : "Not installed")])));
       const login = el(doc, "input", { type: "checkbox", onchange: async () => { login.checked = await call("setOpenAtLogin", { on: login.checked }); } });
       login.checked = s.openAtLogin;
-      kids.push(head(doc, "General"), el(doc, "label", { class: "sra-check" }, login, "Open at login"));
+      const port = el(doc, "input", { type: "checkbox", onchange: async () => { port.checked = await call("setKeepDebugPort", { on: port.checked }); } });
+      port.checked = s.keepDebugPort;
+      kids.push(head(doc, "General"), el(doc, "label", { class: "sra-check" }, login, "Open at login"),
+        el(doc, "label", { class: "sra-check" }, port, "Keep Steam's debug port on after quitting"),
+        el(doc, "span", { class: "sra-muted" }, "The app needs Steam's developer switch, which opens port 8080 on this computer. Turn this off to remove the switch when the app quits; Steam closes the port the next time it starts."));
       if (s.updateVersion) {
         const note = el(doc, "span", { class: "sra-muted" }, `Version ${s.updateVersion} is available.`);
         const update = el(doc, "button", { class: "sra-btn", onclick: async () => {

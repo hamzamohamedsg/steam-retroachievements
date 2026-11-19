@@ -128,12 +128,13 @@ On macOS it then moves the app to the Trash; on Linux and Windows, delete the pr
 
 ## 🔒 How It Works and Privacy
 
-- The app turns on Steam's built-in developer switch: an empty file named `.cef-enable-remote-debugging` in Steam's install folder (inside Steam's app bundle on macOS, `~/.steam/steam` on Linux, the folder with `steam.exe` on Windows). With it, Steam lets local programs talk to its interface on `127.0.0.1:8080`.
+- The app turns on Steam's built-in developer switch: an empty file named `.cef-enable-remote-debugging` in Steam's install folder (inside Steam's app bundle on macOS, `~/.steam/steam` on Linux, the folder with `steam.exe` on Windows). With it, Steam opens port 8080 on this computer (`127.0.0.1` only) and lets local programs talk to its interface there, for as long as Steam runs.
+- By default the switch stays on after the app quits. To have the app remove it when it quits, turn off **Keep Steam's debug port on after quitting** in Settings, or choose **Quit and Close Steam's Debug Port** from the menu bar (macOS) or tray (Windows). Steam closes the port the next time it starts, and the app turns the switch back on (asking you to restart Steam) the next time it runs.
 - The app adds one small script to Steam's interface. The script draws the panel, and the app does everything else:
   - fingerprints your ROMs with RetroAchievements' own code (rcheevos)
   - talks to the RetroAchievements API
   - keeps your Web API key: in the macOS Keychain, on Linux in a file only your user account can read, or on Windows encrypted with your Windows account (DPAPI), so other users and other PCs can't read it. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
-- The app opens no network ports and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
+- The app itself opens no network ports (the one above is Steam's) and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
 - It goes online only to talk to RetroAchievements, to check GitHub for a newer release, and to fetch artwork from SteamGridDB for games you add (it sends their titles). No tracking, no analytics.
 
 ---

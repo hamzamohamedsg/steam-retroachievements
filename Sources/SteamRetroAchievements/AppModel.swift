@@ -40,6 +40,8 @@ import WinSDK
                 signIn: { username, apiKey in await AppModel.shared.signIn(username: username, apiKey: apiKey) },
                 signOut: { await AppModel.shared.signOut() },
                 setOpenAtLogin: { on in await AppModel.shared.setOpenAtLogin(on) },
+                keepDebugPort: { await MainActor.run { AppModel.keepDebugPort } },
+                setKeepDebugPort: { on in await AppModel.setKeepDebugPort(on) },
                 uninstall: { await AppModel.shared.uninstall() },
                 updateVersion: { await MainActor.run { AppModel.shared.update?.version } },
                 installUpdate: { await AppModel.shared.installUpdate() },
@@ -65,6 +67,7 @@ import WinSDK
 
     func launch() {
         #if os(Linux)
+        quitOnSignals()
         RunningCopy.takeOver()
         DesktopEntry.install()
         // The login service starts this copy from now on, so an update unpacked somewhere else takes over at the next login too.
@@ -139,6 +142,42 @@ import WinSDK
         do { try LoginItem.set(on) } catch { Log.error("login item: \(error)") }
         return LoginItem.isEnabled
     }
+
+    /// Present when the user turned off "Keep Steam's debug port on after quitting" (issue #14); absent, the default, keeps it on.
+    static let closePortFile = AppPaths.data.appendingPathComponent("close-debug-port-on-quit")
+    static var keepDebugPort: Bool { !FileManager.default.fileExists(atPath: closePortFile.path) }
+
+    static func setKeepDebugPort(_ on: Bool) -> Bool {
+        if on {
+            try? FileManager.default.removeItem(at: closePortFile)
+        } else {
+            try? FileManager.default.createDirectory(at: AppPaths.data, withIntermediateDirectories: true)
+            try? Data().write(to: closePortFile)
+        }
+        return keepDebugPort
+    }
+
+    /// Every way the app quits by choice runs this last. Steam keeps the port open until it restarts; it just won't open it again.
+    /// On the main actor, so the connection's poll can't put the marker back before the process ends.
+    func quitting(closePort: Bool = false) {
+        guard closePort || !Self.keepDebugPort else { return }
+        do { try marker.remove(); Log.info("removed Steam's debug switch") } catch { Log.error("debug switch: \(error)") }
+    }
+
+    #if os(Linux)
+    /// systemd stops the login service, and a session ends, with SIGTERM; Ctrl-C in a terminal is SIGINT.
+    @ObservationIgnored private var signalSources: [any DispatchSourceSignal] = []
+
+    func quitOnSignals() {
+        signalSources = [SIGTERM, SIGINT].map { sig in
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { MainActor.assumeIsolated { AppModel.shared.quitting() }; exit(0) }
+            source.resume()
+            return source
+        }
+    }
+    #endif
 
     /// The Settings dialog asked first. Quits once the bridge reply has had time to reach Steam.
     func uninstall() {

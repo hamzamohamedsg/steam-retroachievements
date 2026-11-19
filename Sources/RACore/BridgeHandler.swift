@@ -25,6 +25,10 @@ public struct BridgeActions: Sendable {
     public var signOut: @Sendable () async -> Void
     /// Returns the setting now in effect.
     public var setOpenAtLogin: @Sendable (Bool) async -> Bool
+    /// Whether Steam's debug switch stays on after the app quits.
+    public var keepDebugPort: @Sendable () async -> Bool
+    /// Returns the setting now in effect.
+    public var setKeepDebugPort: @Sendable (Bool) async -> Bool
     public var uninstall: @Sendable () async -> Void
     /// The newer version on GitHub, if there is one.
     public var updateVersion: @Sendable () async -> String?
@@ -39,12 +43,14 @@ public struct BridgeActions: Sendable {
     public init(openURL: @escaping @Sendable (URL) async -> Void = { _ in }, log: @escaping @Sendable (String, String) -> Void = { _, _ in },
                 account: @escaping @Sendable () async -> (username: String?, openAtLogin: Bool) = { (nil, false) },
                 signIn: @escaping @Sendable (String, String) async -> String? = { _, _ in nil }, signOut: @escaping @Sendable () async -> Void = {},
-                setOpenAtLogin: @escaping @Sendable (Bool) async -> Bool = { $0 }, uninstall: @escaping @Sendable () async -> Void = {},
+                setOpenAtLogin: @escaping @Sendable (Bool) async -> Bool = { $0 },
+                keepDebugPort: @escaping @Sendable () async -> Bool = { true }, setKeepDebugPort: @escaping @Sendable (Bool) async -> Bool = { $0 },
+                uninstall: @escaping @Sendable () async -> Void = {},
                 updateVersion: @escaping @Sendable () async -> String? = { nil }, installUpdate: @escaping @Sendable () async -> String? = { nil },
                 openLog: @escaping @Sendable () async -> Void = {}, credentials: @escaping @Sendable () async -> RACredentials? = { nil },
                 steamState: @escaping @Sendable () async -> String = { "" }) {
         self.openURL = openURL; self.log = log; self.account = account; self.signIn = signIn; self.signOut = signOut
-        self.setOpenAtLogin = setOpenAtLogin; self.uninstall = uninstall; self.updateVersion = updateVersion; self.installUpdate = installUpdate
+        self.setOpenAtLogin = setOpenAtLogin; self.keepDebugPort = keepDebugPort; self.setKeepDebugPort = setKeepDebugPort; self.uninstall = uninstall; self.updateVersion = updateVersion; self.installUpdate = installUpdate
         self.openLog = openLog; self.credentials = credentials; self.steamState = steamState
     }
 }
@@ -82,7 +88,7 @@ public final class BridgeHandler: BridgeHandling {
     struct SignInResult: Encodable { var error: String? }
     struct ToggleParams: Decodable { var on: Bool }
     struct EmulatorStatus: Encodable { var name: String; var installed: Bool }
-    struct SettingsResult: Encodable { var username: String?; var openAtLogin: Bool; var emulators: [EmulatorStatus]; var updateVersion: String? }
+    struct SettingsResult: Encodable { var username: String?; var openAtLogin, keepDebugPort: Bool; var emulators: [EmulatorStatus]; var updateVersion: String? }
     struct ShortcutLine: Decodable { var exe, launchOptions: String }
     /// Override keys are a folder path and a console id (as text: JSON object keys).
     struct ScanParams: Decodable { var folder: String?; var shortcuts: [ShortcutLine]; var consoleOverrides: [String: Int]; var emulatorOverrides: [String: Emulator] }
@@ -132,7 +138,7 @@ public final class BridgeHandler: BridgeHandling {
         case "settings":
             let (username, openAtLogin) = await actions.account()
             let found = installed().emulators
-            return try encode(SettingsResult(username: username, openAtLogin: openAtLogin,
+            return try encode(SettingsResult(username: username, openAtLogin: openAtLogin, keepDebugPort: await actions.keepDebugPort(),
                                              emulators: Emulator.allCases.map { EmulatorStatus(name: $0.displayName, installed: found[$0] != nil) },
                                              updateVersion: await actions.updateVersion()))
         case "signIn":
@@ -143,6 +149,8 @@ public final class BridgeHandler: BridgeHandling {
             return Data("null".utf8)
         case "setOpenAtLogin":
             return try encode(await actions.setOpenAtLogin(try d.decode(ToggleParams.self, from: params).on))
+        case "setKeepDebugPort":
+            return try encode(await actions.setKeepDebugPort(try d.decode(ToggleParams.self, from: params).on))
         case "uninstall":
             await actions.uninstall()
             return Data("null".utf8)
