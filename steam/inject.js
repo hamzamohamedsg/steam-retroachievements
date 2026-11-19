@@ -857,7 +857,9 @@
   // ---------------------------------------------------------------- playtime (docs/steam-internals.md Q15)
   // RA's playtime and last-played time go where Steam keeps its own games': the overview (library sorts, Recent Games)
   // and the details (the play bar's Last Played and Play Time), so Steam draws and sorts them itself.
-  const playtimes = new Map();  // appid → { minutes, lastPlayed }
+  // Kept across Steam restarts, so a game shows its playtime straight away rather than Steam's own until the first sync answers.
+  const PLAYTIMES_KEY = "sra-playtimes";
+  const playtimes = new Map((() => { try { return JSON.parse(localStorage.getItem(PLAYTIMES_KEY)) ?? []; } catch (_) { return []; } })());  // appid → playtimes row
   const applyOverview = (ov) => {
     const t = playtimes.get(ov?.appid);
     if (!t) return;
@@ -1004,16 +1006,24 @@
   };
   hookOverviews();
   // All shortcuts, or one (after it was played). Shortcuts the app no longer has playtime for go back to none.
+  // A failed sync (RA or the app not answering) changes nothing and tries again in a minute; so do the games RA failed to answer for.
+  let playtimeRetry = null;
+  const retryPlaytimes = () => { clearTimeout(playtimeRetry); playtimeRetry = setTimeout(() => syncPlaytimes(), 60000); };
   const syncPlaytimes = safe(async (only) => {
-    const rows = (await call("playtimes", { shortcuts: only ? [only] : await listShortcuts() }, 600000)) ?? [];
+    let rows;
+    try { rows = (await call("playtimes", { shortcuts: only ? [only] : await listShortcuts() }, 600000)) ?? []; } catch (e) { retryPlaytimes(); throw e; }
     if (!only) for (const id of playtimes.keys()) if (!rows.some((r) => r.appid === id)) rows.push({ appid: id, minutes: 0, lastPlayed: 0, twoWeeks: 0 });
-    for (const r of rows) {
-      playtimes.set(r.appid, r);
-      applyOverview(appStore.GetAppOverviewByAppID(r.appid));
-      applyDetails(r.appid);
-      r.total === undefined ? forgetProgress(r.appid) : setProgress(r.appid, r);
-    }
+    if (rows.some((r) => r.failed)) retryPlaytimes();
+    for (const r of rows) if (!r.failed) applyPlaytime(r);
+    for (const r of rows) if (r.total === undefined) playtimes.delete(r.appid);  // put back to none once; Steam's own answer from then on
+    try { localStorage.setItem(PLAYTIMES_KEY, JSON.stringify([...playtimes])); } catch (_) {}
   });
+  const applyPlaytime = (r) => {
+    playtimes.set(r.appid, r);
+    applyOverview(appStore.GetAppOverviewByAppID(r.appid));
+    applyDetails(r.appid);
+    r.total === undefined ? forgetProgress(r.appid) : setProgress(r.appid, r);
+  };
   // shortcut: a game played on another device shows up at the next hourly sync
   const playtimeInterval = setInterval(() => syncPlaytimes(), 3600000);
   let playtimesSynced = false;
@@ -1117,7 +1127,7 @@
   let lastDoc = null, lastAppid = null;
   const tick = safe(() => {
     hookOverviews();
-    if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; syncPlaytimes(); }
+    if (!playtimesSynced && appStore.m_bIsInitialized) { playtimesSynced = true; playtimes.forEach(applyPlaytime); syncPlaytimes(); }
     if (current) applyDetails(current.appid);  // Steam replaces a page's details when it hears about the app again
     steamAchievements.forEach((_, id) => applyDetails(id));
     progress.forEach((_, id) => applyProgress(id));  // Steam's own reply can land after ours
@@ -1245,6 +1255,7 @@
     dispose: safe(() => {
       clearInterval(interval);
       clearInterval(playtimeInterval);
+      clearTimeout(playtimeRetry);
       clearInterval(unlockInterval);
       if (initFromProto) overviewProto.InitFromProto = initFromProto;
       for (const id of steamAchievements.keys()) feedSteam(id, null);

@@ -68,8 +68,8 @@ struct EchoHandler: BridgeHandling {
     let rows = { () async throws -> [[String: Int]]? in
         try JSONSerialization.jsonObject(with: try await handler.handle(method: "playtimes", params: params)) as? [[String: Int]]
     }
-    // A first sync has no earlier total to compare with, so the whole total counts as the last two weeks.
-    #expect(try await rows() == [["appid": 1, "minutes": 62, "lastPlayed": Int(played.timeIntervalSince1970), "twoWeeks": 62, "unlocked": 2, "total": 3],
+    // A first sync has no earlier total to compare with, so none of it counts as the last two weeks.
+    #expect(try await rows() == [["appid": 1, "minutes": 62, "lastPlayed": Int(played.timeIntervalSince1970), "twoWeeks": 0, "unlocked": 2, "total": 3],
                                  ["appid": 2, "minutes": 0, "lastPlayed": 0, "twoWeeks": 0, "unlocked": 2, "total": 3]])
     // The progress saved just now is newer than the last play (and Zelda has no play at all), so the next sync doesn't fetch it again.
     let progressCalls = { transport.urls.filter { $0.path.hasSuffix("UserProgress.php") }.count }
@@ -78,13 +78,33 @@ struct EchoHandler: BridgeHandling {
     #expect(progressCalls() == before)
 }
 
+@Test func playtimesFailWithoutZeroing() async throws {
+    let data = tempDir()
+    let played = Date(timeIntervalSince1970: (Date().timeIntervalSince1970 - 86_400).rounded(.down))
+    let recent = Data(#"[{"GameID":1446,"LastPlayed":"\#(RADate.formatter.string(from: played))"}]"#.utf8)
+    DiskCache(directory: data.appendingPathComponent("cache")).put("gamelist-7", [smbEntry])
+    let handler = { (recentStatus: Int) in
+        let transport = FakeTransport { url in url.path.hasSuffix("RecentlyPlayedGames.php") ? (recent, recentStatus) : (Data(), 500) }
+        let services = Services(credentials: creds, dataDirectory: data, transport: transport)
+        return BridgeHandler(services: { services }, actions: BridgeActions(), push: { _ in })
+    }
+    let params = try JSONEncoder().encode(["shortcuts": [smb()]])
+    // RA can't give the game's progress and nothing is saved: the row says so, so Steam keeps what it shows.
+    let rows = try JSONSerialization.jsonObject(with: try await handler(200).handle(method: "playtimes", params: params)) as? [[String: Any]]
+    #expect(rows?.first?["failed"] as? Bool == true)
+    // RA's recently played list failing fails the whole sync rather than leaving games without a last play.
+    await #expect(throws: (any Error).self) { try await handler(500).handle(method: "playtimes", params: params) }
+}
+
 @Test func lastTwoWeeksFromSavedTotals() {
     let file = tempDir().appendingPathComponent("playtime.json"), day: TimeInterval = 86_400
     let t0 = Date(timeIntervalSince1970: 1_790_000_000)
     let h = PlaytimeHistory(file: file)
-    // No history from before the window yet: a game played in it gets its whole total, one that wasn't gets nothing.
-    #expect(h.lastTwoWeeks(gameId: 1, total: 6_000, lastPlayed: t0 - day, now: t0) == 6_000)
+    // A first sync can't tell when the total was played: nothing counts as the last two weeks, never the whole total.
+    #expect(h.lastTwoWeeks(gameId: 1, total: 6_000, lastPlayed: t0 - day, now: t0) == 0)
     #expect(h.lastTwoWeeks(gameId: 2, total: 9_000, lastPlayed: t0 - 20 * day, now: t0) == 0)
+    // Still inside the first two weeks: what was played since the first sync.
+    #expect(h.lastTwoWeeks(gameId: 1, total: 6_600, lastPlayed: t0 + 3 * day, now: t0 + 3 * day) == 600)
     // 15 days on, the first total is from before the window: only what was played since counts. The history survives a restart.
     #expect(PlaytimeHistory(file: file).lastTwoWeeks(gameId: 1, total: 7_200, lastPlayed: t0 + 15 * day, now: t0 + 15 * day) == 1_200)
     #expect(PlaytimeHistory(file: file).lastTwoWeeks(gameId: 1, total: 7_200, lastPlayed: t0 + 15 * day, now: t0 + 40 * day) == 0)

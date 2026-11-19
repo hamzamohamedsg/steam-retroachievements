@@ -102,7 +102,8 @@ public final class BridgeHandler: BridgeHandling {
     struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
     struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
     /// Steam's own units: whole minutes, and a Unix time. `unlocked`/`total`: the main set, for Steam's library tiles.
-    struct Playtime: Encodable { var appid: UInt32; var minutes, lastPlayed, twoWeeks, unlocked, total: Int }
+    /// `failed`: RA couldn't answer for it this time, so Steam keeps what it shows; absent otherwise.
+    struct Playtime: Encodable { var appid: UInt32; var minutes = 0, lastPlayed = 0, twoWeeks = 0, unlocked = 0, total = 0; var failed: Bool? }
     /// `since`: when the game started, a Unix time.
     struct UnlocksParams: Decodable { var since: Double }
     struct Unlock: Encodable { var id: Int; var title, description, image: String; var date: Int }
@@ -161,7 +162,7 @@ public final class BridgeHandler: BridgeHandling {
         case "playtimes":
             let p = try d.decode(PlaytimeParams.self, from: params)
             guard let s = await services() else { return try encode([Playtime]()) }
-            return try encode(await playtimes(p.shortcuts, s))
+            return try encode(try await playtimes(p.shortcuts, s))
         case "unlocks":
             let p = try d.decode(UnlocksParams.self, from: params)
             guard let s = await services() else { return try encode([Unlock]()) }
@@ -253,29 +254,29 @@ public final class BridgeHandler: BridgeHandling {
     /// RA's playtime and last-played time for the shortcuts whose games the user has played, for Steam's Play Time and Last Played,
     /// and every matched shortcut's achievement counts, for its library tiles.
     /// Progress is fetched only for games played since it was last saved, or never saved.
-    private func playtimes(_ shortcuts: [ShortcutInfo], _ s: Services) async -> [Playtime] {
+    private func playtimes(_ shortcuts: [ShortcutInfo], _ s: Services) async throws -> [Playtime] {
         var lastPlayed: [Int: Date] = [:]
         // shortcut: reads the 500 most recently played games; older ones keep Steam's own (empty) playtime
         for page in 0..<Self.recentPages {
-            let games: [RARecentGame]
-            do { games = try await s.ra.recentlyPlayed(offset: page * 50) } catch {
-                actions.log("error", "recently played: \(error)")
-                break
-            }
+            // A failed page fails the sync: without it, games would lose their playtime. Steam keeps what it shows until a retry.
+            let games = try await s.ra.recentlyPlayed(offset: page * 50)
             // No last-played time: its playtime still counts, and any saved progress is as new as it gets.
             for g in games where lastPlayed[g.gameId] == nil { lastPlayed[g.gameId] = g.lastPlayed ?? .distantPast }
             if games.count < 50 { break }
         }
         var out: [Playtime] = []
         for shortcut in shortcuts {
-            guard case let .matched(gameId, _, _)? = try? await s.matcher.resolve(shortcut) else { continue }
+            let failed = Playtime(appid: shortcut.appid, failed: true)
+            let resolution: Resolution
+            do { resolution = try await s.matcher.resolve(shortcut) } catch { out.append(failed); continue }
+            guard case let .matched(gameId, _, _) = resolution else { continue }
             let played = lastPlayed[gameId], cached = s.ra.cachedProgress(gameId: gameId)
             // Not played lately: nothing has been unlocked since it was saved.
             var fetched = cached.flatMap { c in played.map { c.savedAt > $0 && c.value.userTotalPlaytime != nil } ?? true ? c.value : nil }
             if fetched == nil { fetched = (try? await s.ra.gameProgress(gameId: gameId)) ?? cached?.value }
-            guard let progress = fetched else { continue }
+            guard let progress = fetched else { out.append(failed); continue }
             let unlocked = progress.achievements.filter { $0.dateEarned != nil || $0.dateEarnedHardcore != nil }.count
-            var row = Playtime(appid: shortcut.appid, minutes: 0, lastPlayed: 0, twoWeeks: 0, unlocked: unlocked, total: progress.achievements.count)
+            var row = Playtime(appid: shortcut.appid, unlocked: unlocked, total: progress.achievements.count)
             if let played, let seconds = progress.userTotalPlaytime {
                 let twoWeeks = s.playtimeHistory.lastTwoWeeks(gameId: gameId, total: seconds, lastPlayed: played)
                 row.minutes = (seconds + 59) / 60
