@@ -362,7 +362,7 @@ private func failingMove(at index: Int, andAfter: Bool = false) -> @Sendable (UR
     let handler = BridgeHandler(services: { nil }, actions: BridgeActions(updateVersion: { "9.0.0" }, installUpdate: {
         started.withLock { $0 += 1 }
         return "Couldn't install it."
-    }), push: { _ in }, installed: { Installed(emulators: [:], coresDirectory: tempDir()) })
+    }), push: { _ in }, installed: { Installed(emulators: [:], coresDirectories: [tempDir()]) })
     let settings = try JSONSerialization.jsonObject(with: try await handler.handle(method: "settings", params: Data("{}".utf8))) as? [String: Any]
     #expect(settings?["updateVersion"] as? String == "9.0.0")
     // The page passes no parameters: it can't choose what gets installed.

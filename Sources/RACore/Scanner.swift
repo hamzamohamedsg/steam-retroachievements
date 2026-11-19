@@ -23,13 +23,24 @@ public struct Launcher: Equatable, Sendable {
     public init(exe: String, args: String = "") { self.exe = exe; self.args = args }
 }
 
-/// What's installed: emulator → launcher, and RetroArch's cores folder.
+/// What's installed: emulator → launcher, and the folders RetroArch's cores can be in (searched in order).
 public struct Installed: Sendable {
     public var emulators: [Emulator: Launcher]
-    public var coresDirectory: URL
+    public var coresDirectories: [URL]
 
-    public init(emulators: [Emulator: Launcher], coresDirectory: URL) {
-        self.emulators = emulators; self.coresDirectory = coresDirectory
+    public init(emulators: [Emulator: Launcher], coresDirectories: [URL]) {
+        self.emulators = emulators; self.coresDirectories = coresDirectories
+    }
+
+    /// The `libretro_directory` of a retroarch.cfg: `~` is the home folder, `:` the folder the cfg is in; nil when unset or `default`.
+    static func libretroDirectory(config: String, configFolder: URL, home: URL) -> URL? {
+        guard let line = config.split(whereSeparator: \.isNewline).first(where: { $0.hasPrefix("libretro_directory") }),
+              let eq = line.firstIndex(of: "=") else { return nil }
+        var value = line[line.index(after: eq)...].trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t"))
+        if value.isEmpty || value == "default" { return nil }
+        if value.hasPrefix("~") { value = home.path + value.dropFirst() }
+        else if value.hasPrefix(":") { value = configFolder.path + value.dropFirst() }
+        return URL(fileURLWithPath: value)
     }
 
     #if os(macOS)
@@ -48,6 +59,8 @@ public struct Installed: Sendable {
             if let exe = e.installedApp().flatMap({ Bundle(url: $0)?.executableURL?.path }) { found[e] = Launcher(exe: exe) }
         }
         let cores = home.appendingPathComponent("Library/Application Support/RetroArch/cores")
+        let configFolder = home.appendingPathComponent("Library/Application Support/RetroArch/config")
+        let extraCores = [URL]()
         #else
         let env = ProcessInfo.processInfo.environment
         #if os(Windows)
@@ -76,14 +89,23 @@ public struct Installed: Sendable {
             }
         }
         #if os(Windows)
-        let cores = URL(fileURLWithPath: found[.retroarch]?.exe ?? "C:\\RetroArch-Win64\\retroarch.exe").deletingLastPathComponent().appendingPathComponent("cores")
+        let configFolder = URL(fileURLWithPath: found[.retroarch]?.exe ?? "C:\\RetroArch-Win64\\retroarch.exe").deletingLastPathComponent()
+        let cores = configFolder.appendingPathComponent("cores")
+        let extraCores = [URL]()
         #else
-        // shortcut: distro-packaged cores (/usr/lib/libretro) aren't looked at, only ones RetroArch's Core Downloader fetched
-        let cores = home.appendingPathComponent(found[.retroarch]?.exe == "/usr/bin/flatpak"
-            ? ".var/app/org.libretro.RetroArch/config/retroarch/cores" : ".config/retroarch/cores")
+        let flatpak = found[.retroarch]?.exe == "/usr/bin/flatpak"
+        let configFolder = home.appendingPathComponent(flatpak ? ".var/app/org.libretro.RetroArch/config/retroarch" : ".config/retroarch")
+        let cores = configFolder.appendingPathComponent("cores")
+        // The Flatpak sandbox can't load host libraries, so distro-packaged cores only count for a native RetroArch.
+        let extraCores = flatpak ? [] : ["/usr/lib", "/usr/lib64", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/usr/local/lib"]
+            .map { URL(fileURLWithPath: $0 + "/libretro") }
         #endif
         #endif
-        return Installed(emulators: found, coresDirectory: cores)
+        let configured = (try? String(contentsOf: configFolder.appendingPathComponent("retroarch.cfg"), encoding: .utf8))
+            .flatMap { libretroDirectory(config: $0, configFolder: configFolder, home: home) }
+        var dirs = [URL]()
+        for dir in [configured].compactMap({ $0 }) + [cores] + extraCores where !dirs.contains(where: { $0.path == dir.path }) { dirs.append(dir) }
+        return Installed(emulators: found, coresDirectories: dirs)
     }
 
     #if os(Windows)
@@ -119,7 +141,7 @@ public struct Installed: Sendable {
 
     /// The first installed core RetroArch has for a console, as a full path.
     func core(for console: Console) -> String? {
-        console.cores.map { coresDirectory.appendingPathComponent("\($0)_libretro.\(Self.coreExtension)").path }
+        console.cores.lazy.flatMap { core in coresDirectories.map { $0.appendingPathComponent("\(core)_libretro.\(Self.coreExtension)").path } }
             .first { FileManager.default.fileExists(atPath: $0) }
     }
 }

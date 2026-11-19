@@ -22,7 +22,7 @@ func touch(_ root: URL, _ rel: String) {
 func installed(cores: [String]) -> Installed {
     let dir = tempDir()
     for c in cores { touch(dir, "\(c)_libretro.\(Installed.coreExtension)") }
-    return Installed(emulators: [.retroarch: Launcher(exe: "/A/RetroArch"), .duckstation: Launcher(exe: "/A/DuckStation")], coresDirectory: dir)
+    return Installed(emulators: [.retroarch: Launcher(exe: "/A/RetroArch"), .duckstation: Launcher(exe: "/A/DuckStation")], coresDirectories: [dir])
 }
 
 @Test func scansFolderTree() {
@@ -72,7 +72,7 @@ func installed(cores: [String]) -> Installed {
 @Test func shortcutLaunchOptions() {
     let inst = installed(cores: ["snes9x"])
     let item = ScanItem(romPath: "/r/snes/Super Mario World (USA).sfc", title: "Super Mario World", consoleId: 3, emulator: .retroarch,
-                        coreFile: inst.coresDirectory.appendingPathComponent("snes9x_libretro.dylib").path, status: .ready)
+                        coreFile: inst.coresDirectories[0].appendingPathComponent("snes9x_libretro.dylib").path, status: .ready)
     let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: true)
     // Steam on macOS launches games as x86_64; arch -arm64 keeps emulators native so arm64 cores load.
     #expect(s.exe == "\"/usr/bin/arch\"")
@@ -95,7 +95,7 @@ func installed(cores: [String]) -> Installed {
 }
 
 @Test func shortcutWithoutArch() {
-    let inst = Installed(emulators: [.retroarch: Launcher(exe: "/usr/bin/flatpak", args: "run org.libretro.RetroArch")], coresDirectory: tempDir())
+    let inst = Installed(emulators: [.retroarch: Launcher(exe: "/usr/bin/flatpak", args: "run org.libretro.RetroArch")], coresDirectories: [tempDir()])
     let item = ScanItem(romPath: "/r/nes/a.nes", title: "a", consoleId: 7, emulator: .retroarch, coreFile: "/c/mesen_libretro.so", status: .ready)
     let s = Scanner.shortcut(for: item, installed: inst, wrapInArch: false)
     #expect(s.exe == "\"/usr/bin/flatpak\"")
@@ -118,7 +118,7 @@ func installed(cores: [String]) -> Installed {
 
 #if os(Windows)
 @Test func ps2ShortcutUsesNativeWindowsRomPath() {
-    let inst = Installed(emulators: [.pcsx2: Launcher(exe: #"C:\Program Files\PCSX2\pcsx2-qt.exe"#)], coresDirectory: tempDir())
+    let inst = Installed(emulators: [.pcsx2: Launcher(exe: #"C:\Program Files\PCSX2\pcsx2-qt.exe"#)], coresDirectories: [tempDir()])
     let item = ScanItem(romPath: "D:/ROMs/ps2/Silent Hill 2 (USA).chd", title: "Silent Hill 2", consoleId: 21,
                         emulator: .pcsx2, coreFile: nil, status: .ready)
     let shortcut = Scanner.shortcut(for: item, installed: inst)
@@ -153,7 +153,7 @@ func installed(cores: [String]) -> Installed {
 @Test func scansPS2CHDFromFolderWithoutHashing() {
     let root = tempDir()
     touch(root, "ps2/Silent Hill 2.chd")
-    let inst = Installed(emulators: [.pcsx2: Launcher(exe: "/portable/PCSX2/pcsx2-qt.exe")], coresDirectory: tempDir())
+    let inst = Installed(emulators: [.pcsx2: Launcher(exe: "/portable/PCSX2/pcsx2-qt.exe")], coresDirectories: [tempDir()])
     let items = Scanner(installed: inst, hasher: PathHasher(byFile: [:]))
         .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: [:])
     #expect(items.count == 1)
@@ -168,7 +168,7 @@ func installed(cores: [String]) -> Installed {
     touch(root, "wii/game.rvz")
     let scan = { (emulators: [Emulator], cores: [String], overrides: [Int: Emulator]) -> ScanItem? in
         let inst = installed(cores: cores)
-        let found = Installed(emulators: Dictionary(uniqueKeysWithValues: emulators.map { ($0, Launcher(exe: "/A/\($0.displayName)")) }), coresDirectory: inst.coresDirectory)
+        let found = Installed(emulators: Dictionary(uniqueKeysWithValues: emulators.map { ($0, Launcher(exe: "/A/\($0.displayName)")) }), coresDirectories: inst.coresDirectories)
         return Scanner(installed: found, hasher: PathHasher(byFile: [:]))
             .scan(folder: root, existingRomPaths: [], consoleOverrides: [:], emulatorOverrides: overrides).first
     }
@@ -192,6 +192,23 @@ func installed(cores: [String]) -> Installed {
     #expect(EmulatorPreference.order(for: 27) == [.retroarch, .flycast])
     for gameBoy in [4, 5, 6] { #expect(EmulatorPreference.order(for: gameBoy) == [.retroarch, .skyemu]) }
     #expect(EmulatorPreference.order(for: 3) == [.retroarch])
+}
+
+@Test func libretroDirectoryFromConfig() {
+    let cfg = URL(fileURLWithPath: "/cfg"), home = URL(fileURLWithPath: "/home/me")
+    let dir = { (text: String) in Installed.libretroDirectory(config: text, configFolder: cfg, home: home)?.path }
+    #expect(dir("video_fullscreen = \"true\"\nlibretro_directory = \"/opt/cores\"\n") == "/opt/cores")
+    #expect(dir("libretro_directory = \"~/Library/Application Support/RetroArch/cores\"") == "/home/me/Library/Application Support/RetroArch/cores")
+    #expect(dir("libretro_directory = \":/cores\"") == "/cfg/cores")
+    #expect(dir("libretro_directory = \"default\"") == nil)
+    #expect(dir("video_fullscreen = \"true\"") == nil)
+}
+
+@Test func coreIsFoundInALaterDirectory() {
+    let first = tempDir(), second = tempDir()
+    touch(second, "snes9x_libretro.\(Installed.coreExtension)")
+    let inst = Installed(emulators: [.retroarch: Launcher(exe: "/A/RetroArch")], coresDirectories: [first, second])
+    #expect(inst.core(for: Consoles.byID(3)!) == second.appendingPathComponent("snes9x_libretro.\(Installed.coreExtension)").path)
 }
 
 @Test func ps2RunsOnRetroArchWithoutPCSX2() {
