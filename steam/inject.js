@@ -42,7 +42,7 @@
       const history = SteamUIStore.WindowStore?.GamepadUIMainWindowInstance?.m_history ?? SteamUIStore.GetFocusedWindowInstance?.()?.m_history;
       if (bpm) return { doc: bpm, bpm: true, route: history?.location?.pathname ?? "" };
       const doc = g_PopupManager.GetExistingPopup("SP Desktop_uid0")?.m_popup?.document;
-      return doc ? { doc, bpm: false, route: MainWindowBrowserManager?.m_lastLocation?.pathname ?? "" } : null;
+      return doc ? { doc, bpm: false, route: window.MainWindowBrowserManager?.m_lastLocation?.pathname ?? "" } : null;
     },
     doc: () => steamUI.surface()?.doc ?? null,
     appid: (surface) => Number(/^\/library\/app\/(\d+)/.exec(surface?.route ?? "")?.[1]) || null,

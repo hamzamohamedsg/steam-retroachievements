@@ -23,7 +23,8 @@ enum Tray {
         "SteamRetroAchievementsTray".withCString(encodedAs: UTF16.self) { className in
             // A few rounds at most: a copy that can't be stopped must not keep this one from starting.
             for _ in 0..<4 {
-                guard let hwnd = FindWindowExW(HWND(bitPattern: -3), nil, className, nil) else { return }
+                // Up to 0.1.14 the window was message-only; since then it's a hidden top-level one.
+                guard let hwnd = FindWindowExW(HWND(bitPattern: -3), nil, className, nil) ?? FindWindowW(className, nil) else { return }
                 var pid: DWORD = 0
                 GetWindowThreadProcessId(hwnd, &pid)
                 guard pid != GetCurrentProcessId(), let process = OpenProcess(DWORD(SYNCHRONIZE) | DWORD(PROCESS_TERMINATE), false, pid) else { return }
@@ -42,8 +43,9 @@ enum Tray {
             wc.hInstance = instance
             wc.lpszClassName = className
             RegisterClassW(&wc)
-            // A message-only window: it never shows, it only receives the icon's clicks.
-            let hwnd = CreateWindowExW(0, className, nil, 0, 0, 0, 0, 0, HWND(bitPattern: -3), nil, instance, nil)
+            // A hidden top-level window, never shown: it receives the icon's clicks and the TaskbarCreated broadcast, which
+            // a message-only window never gets. At login the taskbar is often not up yet, so the first NIM_ADD fails and that broadcast re-adds it.
+            let hwnd = CreateWindowExW(0, className, nil, 0, 0, 0, 0, 0, nil, nil, instance, nil)
 
             addIcon(hwnd)
 
