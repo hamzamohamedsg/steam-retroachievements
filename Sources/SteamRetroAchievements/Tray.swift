@@ -11,6 +11,7 @@ enum Tray {
     static let quitCommand = 1
     static let updateCommand = 2
     static let installCommand = 3
+    static let closePortCommand = 4
     static let update = Mutex<(version: String, page: URL)?>(nil)
 
     static func start() {
@@ -23,7 +24,8 @@ enum Tray {
         "SteamRetroAchievementsTray".withCString(encodedAs: UTF16.self) { className in
             // A few rounds at most: a copy that can't be stopped must not keep this one from starting.
             for _ in 0..<4 {
-                guard let hwnd = FindWindowExW(HWND(bitPattern: -3), nil, className, nil) else { return }
+                // Up to 0.1.14 the window was message-only; since then it's a hidden top-level one.
+                guard let hwnd = FindWindowExW(HWND(bitPattern: -3), nil, className, nil) ?? FindWindowW(className, nil) else { return }
                 var pid: DWORD = 0
                 GetWindowThreadProcessId(hwnd, &pid)
                 guard pid != GetCurrentProcessId(), let process = OpenProcess(DWORD(SYNCHRONIZE) | DWORD(PROCESS_TERMINATE), false, pid) else { return }
@@ -42,8 +44,9 @@ enum Tray {
             wc.hInstance = instance
             wc.lpszClassName = className
             RegisterClassW(&wc)
-            // A message-only window: it never shows, it only receives the icon's clicks.
-            let hwnd = CreateWindowExW(0, className, nil, 0, 0, 0, 0, 0, HWND(bitPattern: -3), nil, instance, nil)
+            // A hidden top-level window, never shown: it receives the icon's clicks and the TaskbarCreated broadcast, which
+            // a message-only window never gets. At login the taskbar is often not up yet, so the first NIM_ADD fails and that broadcast re-adds it.
+            let hwnd = CreateWindowExW(0, className, nil, 0, 0, 0, 0, 0, nil, nil, instance, nil)
 
             addIcon(hwnd)
 
@@ -79,10 +82,13 @@ enum Tray {
     }
 
     private static func handle(_ hwnd: HWND?, _ msg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
-        if msg == UINT(WM_COMMAND), Int(wParam & 0xFFFF) == quitCommand {
+        if msg == UINT(WM_COMMAND), [quitCommand, closePortCommand].contains(Int(wParam & 0xFFFF)) {
             var nid = notifyData(hwnd)
             Shell_NotifyIconW(DWORD(NIM_DELETE), &nid)
-            exit(0)
+            let closePort = Int(wParam & 0xFFFF) == closePortCommand
+            // On the main actor, where the connection's poll runs, so it can't put the marker back before the exit.
+            Task { @MainActor in AppModel.shared.quitting(closePort: closePort); exit(0) }
+            return 0
         }
         if msg == UINT(WM_COMMAND), Int(wParam & 0xFFFF) == updateCommand, let page = update.withLock({ $0?.page }) {
             Task { @MainActor in AppModel.open(page) }
@@ -111,6 +117,7 @@ enum Tray {
             "Update available: \(version)".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(updateCommand), $0) }
         }
         "Quit Steam RetroAchievements".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(quitCommand), $0) }
+        "Quit and Close Steam's Debug Port".withCString(encodedAs: UTF16.self) { _ = AppendMenuW(menu, UINT(MF_STRING), UINT_PTR(closePortCommand), $0) }
         var point = POINT()
         GetCursorPos(&point)
         SetForegroundWindow(hwnd)  // otherwise the menu doesn't close when clicking elsewhere

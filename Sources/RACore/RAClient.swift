@@ -6,9 +6,15 @@ import FoundationNetworking
 public protocol HTTPTransport: Sendable {
     /// Body and HTTP status.
     func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int)
+    /// `get` plus the seconds of the reply's Retry-After header, if it had one.
+    func response(_ url: URL, headers: [String: String]) async throws -> (data: Data, status: Int, retryAfter: Double?)
 }
 
 public extension HTTPTransport {
+    func response(_ url: URL, headers: [String: String]) async throws -> (data: Data, status: Int, retryAfter: Double?) {
+        let (data, status) = try await get(url, headers: headers)
+        return (data, status, nil)
+    }
     func get(_ url: URL) async throws -> (Data, Int) { try await get(url, headers: [:]) }
 }
 
@@ -23,11 +29,17 @@ public struct URLSessionTransport: HTTPTransport {
 
     public init() {}
     public func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int) {
+        let (data, status, _) = try await response(url, headers: headers)
+        return (data, status)
+    }
+
+    public func response(_ url: URL, headers: [String: String]) async throws -> (data: Data, status: Int, retryAfter: Double?) {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.setValue("steam-retroachievements/0.1", forHTTPHeaderField: "User-Agent")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await Self.session.data(for: request)
-        return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        let http = response as? HTTPURLResponse
+        return (data, http?.statusCode ?? 0, http?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init))
     }
 }
 
@@ -70,7 +82,7 @@ public final class RAClient: RAProviding {
         try decode([RAUnlock].self, try await request("API_GetUserRecentAchievements.php", ["u": credentials.username, "m": "\(minutes)"]))
     }
 
-    private func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
+    func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
         let url = Self.url(base: "https://retroachievements.org/API/\(endpoint)", params: params.merging(["y": credentials.apiKey]) { $1 })
         // URLError descriptions include the request URL, and with it the API key: never let them escape.
         let data: Data, status: Int

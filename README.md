@@ -50,7 +50,9 @@ You play your retro games through Steam, but their achievements live on a websit
 - **Big Picture mode** with **full controller support**: the D-pad moves through the achievements like any Steam game, and **A** opens the achievements page.
 - **RetroAchievements pages one click away**: click an achievement on the game page to open its page on retroachievements.org. In Big Picture (Steam Deck too), press **X** (□ on PlayStation) on an achievement or subset; it opens in Steam's own browser.
 - **Subsets** (Bonus, Time Attack…) are Steam achievement sets: each has its own progress bar and trophy on the achievements page, and the set filter shows one at a time. A subset counts toward your totals once you unlock something in it, so mastering the game alone still reads 100%.
-- **Add Games**: scan a ROM folder, pick an emulator for each game, and add them all to Steam in one go, with library artwork from SteamGridDB.
+- **Leaderboards**: every RetroAchievements leaderboard for the game and its subsets, with your rank, your score and how you place (Top 12%). The game page lists your best placings; **View All Leaderboards** opens each board's standings with the top three, your neighbours and **Jump to My Rank**. In Big Picture and in Game Mode's in-game menu (the **Achievements** page), the boards sit above the achievements and the controller shows any board's standings, including the score to beat for the next place up. Beat your best while playing and Steam pops up a **New best** notification with your new rank.
+- **Add Games**: scan your ROM folders (add as many as you like, or **Browse…** for one), pick an emulator for each game, and add them all to Steam in one go, with library artwork from SteamGridDB.
+- **Choose artwork**: the best SteamGridDB match is picked by title, and a game it isn't sure about gets no artwork rather than the wrong one. **Choose artwork** (behind the (i) button) lets you search SteamGridDB and pick each cover, wide cover, hero, logo and icon yourself, or **Use All Best**.
 - **Knows your exact ROM**: it fingerprints ROMs with RetroAchievements' own code and warns you when a version won't unlock achievements.
 - Works with **RetroArch**, **DuckStation** (PS1), **PCSX2** (PS2), **PPSSPP** (PSP), **Dolphin** (GameCube/Wii), **Flycast** (Dreamcast) and **SkyEmu** (Game Boy family).
 - **Stays out of the way**: a menu bar app on macOS, a tray icon on Windows, a background program on Linux. Signing in and adding games happen inside Steam.
@@ -70,7 +72,7 @@ You play your retro games through Steam, but their achievements live on a websit
 
 You can open the dialog again from the **RetroAchievements** button at the bottom of Steam's library, next to **Add a Game**.
 
-Keep your ROMs in the `ROMs` folder in your home folder (`~/ROMs`), or EmuDeck's ROM folder (`~/Emulation/roms`, or wherever EmuDeck put it, such as the SD card). On macOS, background apps can't read the Desktop, Documents, Downloads, iCloud Drive, or external drives without extra permission.
+Keep your ROMs in the `ROMs` folder in your home folder (`~/ROMs`), or EmuDeck's ROM folder (`~/Emulation/roms`, or wherever EmuDeck put it, such as the SD card). Games kept elsewhere work too: add more folders in Add Games. On macOS, background apps can't read the Desktop, Documents, Downloads, iCloud Drive, or external drives without extra permission.
 
 **Why the downloads differ in size:** the macOS download is under 1 MB because macOS already includes Swift and the libraries the app uses. Linux and Windows don't, so their downloads (about 25 MB each) carry them along: the Swift runtime, Foundation, networking, and Unicode data (ICU), which is the largest part. The Linux program has them built in; on Windows they're the DLL files next to the `.exe`, which is why every file in that folder has to stay together.
 
@@ -128,12 +130,13 @@ On macOS it then moves the app to the Trash; on Linux and Windows, delete the pr
 
 ## 🔒 How It Works and Privacy
 
-- The app turns on Steam's built-in developer switch: an empty file named `.cef-enable-remote-debugging` in Steam's install folder (inside Steam's app bundle on macOS, `~/.steam/steam` on Linux, the folder with `steam.exe` on Windows). With it, Steam lets local programs talk to its interface on `127.0.0.1:8080`.
+- The app turns on Steam's built-in developer switch: an empty file named `.cef-enable-remote-debugging` in Steam's install folder (inside Steam's app bundle on macOS, `~/.steam/steam` on Linux, the folder with `steam.exe` on Windows). With it, Steam opens port 8080 on this computer (`127.0.0.1` only) and lets local programs talk to its interface there, for as long as Steam runs.
+- By default the switch stays on after the app quits. To have the app remove it when it quits, turn off **Keep Steam's debug port on after quitting** in Settings, or choose **Quit and Close Steam's Debug Port** from the menu bar (macOS) or tray (Windows). Steam closes the port the next time it starts, and the app turns the switch back on (asking you to restart Steam) the next time it runs.
 - The app adds one small script to Steam's interface. The script draws the panel, and the app does everything else:
   - fingerprints your ROMs with RetroAchievements' own code (rcheevos)
   - talks to the RetroAchievements API
   - keeps your Web API key: in the macOS Keychain, on Linux in a file only your user account can read, or on Windows encrypted with your Windows account (DPAPI), so other users and other PCs can't read it. You type the key into a dialog inside Steam, so Steam's interface sees it once while you sign in.
-- The app opens no network ports and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
+- The app itself opens no network ports (the one above is Steam's) and never changes anything in your Steam account. It only adds library shortcuts when you ask it to.
 - It goes online only to talk to RetroAchievements, to check GitHub for a newer release, and to fetch artwork from SteamGridDB for games you add (it sends their titles). No tracking, no analytics.
 
 ---

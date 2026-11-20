@@ -40,13 +40,16 @@ import WinSDK
                 signIn: { username, apiKey in await AppModel.shared.signIn(username: username, apiKey: apiKey) },
                 signOut: { await AppModel.shared.signOut() },
                 setOpenAtLogin: { on in await AppModel.shared.setOpenAtLogin(on) },
+                keepDebugPort: { await MainActor.run { AppModel.keepDebugPort } },
+                setKeepDebugPort: { on in await AppModel.setKeepDebugPort(on) },
                 uninstall: { await AppModel.shared.uninstall() },
                 updateVersion: { await MainActor.run { AppModel.shared.update?.version } },
                 installUpdate: { await AppModel.shared.installUpdate() },
                 // Detached and off the main actor: xdg-open can hold on until the viewer closes.
                 openLog: { Task.detached { AppModel.open(AppPaths.log) } },
                 credentials: { await MainActor.run { AppModel.shared.credentials } },
-                steamState: { await MainActor.run { "\(AppModel.shared.steamState)" } }),
+                steamState: { await MainActor.run { "\(AppModel.shared.steamState)" } },
+                chooseFolder: { await AppModel.chooseFolder() }),
             push: { js in await AppModel.shared.run(js) },
             folderFile: AppPaths.data.appendingPathComponent("rom-folder.txt"), logFile: AppPaths.log))
         services = credentials.map { Services(credentials: $0, dataDirectory: AppPaths.data) }
@@ -65,6 +68,7 @@ import WinSDK
 
     func launch() {
         #if os(Linux)
+        quitOnSignals()
         RunningCopy.takeOver()
         DesktopEntry.install()
         // The login service starts this copy from now on, so an update unpacked somewhere else takes over at the next login too.
@@ -139,6 +143,42 @@ import WinSDK
         do { try LoginItem.set(on) } catch { Log.error("login item: \(error)") }
         return LoginItem.isEnabled
     }
+
+    /// Present when the user turned off "Keep Steam's debug port on after quitting" (issue #14); absent, the default, keeps it on.
+    static let closePortFile = AppPaths.data.appendingPathComponent("close-debug-port-on-quit")
+    static var keepDebugPort: Bool { !FileManager.default.fileExists(atPath: closePortFile.path) }
+
+    static func setKeepDebugPort(_ on: Bool) -> Bool {
+        if on {
+            try? FileManager.default.removeItem(at: closePortFile)
+        } else {
+            try? FileManager.default.createDirectory(at: AppPaths.data, withIntermediateDirectories: true)
+            try? Data().write(to: closePortFile)
+        }
+        return keepDebugPort
+    }
+
+    /// Every way the app quits by choice runs this last. Steam keeps the port open until it restarts; it just won't open it again.
+    /// On the main actor, so the connection's poll can't put the marker back before the process ends.
+    func quitting(closePort: Bool = false) {
+        guard closePort || !Self.keepDebugPort else { return }
+        do { try marker.remove(); Log.info("removed Steam's debug switch") } catch { Log.error("debug switch: \(error)") }
+    }
+
+    #if os(Linux)
+    /// systemd stops the login service, and a session ends, with SIGTERM; Ctrl-C in a terminal is SIGINT.
+    @ObservationIgnored private var signalSources: [any DispatchSourceSignal] = []
+
+    func quitOnSignals() {
+        signalSources = [SIGTERM, SIGINT].map { sig in
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { MainActor.assumeIsolated { AppModel.shared.quitting() }; exit(0) }
+            source.resume()
+            return source
+        }
+    }
+    #endif
 
     /// The Settings dialog asked first. Quits once the bridge reply has had time to reach Steam.
     func uninstall() {
@@ -228,6 +268,33 @@ import WinSDK
         runProcess("C:\\Windows\\System32\\rundll32.exe", ["url.dll,FileProtocolHandler", url.absoluteString])
         #else
         runProcess("/usr/bin/env", ["xdg-open", url.absoluteString])
+        #endif
+    }
+
+    /// The system's folder dialog; nil when cancelled. The Linux and Windows pickers haven't been run (written on a Mac).
+    nonisolated static func chooseFolder() async -> String? {
+        #if os(macOS)
+        // Asking from here also gets the app permission for Desktop, Documents and external drives.
+        return await MainActor.run {
+            NSApp.activate(ignoringOtherApps: true)
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            return panel.runModal() == .OK ? panel.url?.path : nil
+        }
+        #else
+        return await Task.detached {
+            #if os(Windows)
+            let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"
+            let out = runProcess("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", ["-NoProfile", "-STA", "-Command", script])
+            #else
+            // KDE (Steam Deck desktop) has kdialog; 127 means env didn't find it. A cancel exits 1 with no output.
+            var out = runProcess("/usr/bin/env", ["kdialog", "--getexistingdirectory", NSHomeDirectory()])
+            if out.status == 127 || out.status == -1 { out = runProcess("/usr/bin/env", ["zenity", "--file-selection", "--directory"]) }
+            #endif
+            let path = out.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return out.status == 0 && !path.isEmpty ? path : nil
+        }.value
         #endif
     }
 

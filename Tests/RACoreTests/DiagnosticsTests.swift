@@ -12,7 +12,7 @@ private func handler(log: String?, credentials: RACredentials? = fake, opened: C
         try log.write(to: file!, atomically: true, encoding: .utf8)
     }
     let missing = tempDir().appendingPathComponent("never-written.log")
-    let installed = Installed(emulators: [.duckstation: Launcher(exe: "\(home)/Apps/DuckStation")], coresDirectory: tempDir())
+    let installed = Installed(emulators: [.duckstation: Launcher(exe: "\(home)/Apps/DuckStation")], coresDirectories: [tempDir()])
     return BridgeHandler(services: { nil },
                          actions: BridgeActions(openLog: { opened.add() }, credentials: { credentials }, steamState: { "connected" }),
                          push: { _ in }, installed: { installed }, artwork: SteamGridDB(key: "FAKESGDBKEY", transport: FakeTransport { _ in (Data(), 500) }),

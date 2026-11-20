@@ -31,8 +31,8 @@ public final class PlaytimeHistory: @unchecked Sendable {
             return list.first
         }
         if lastPlayed < start { return 0 }
-        // shortcut: until the app has a total from before the window, the whole total is the guess; exact 14 days after its first sync
-        guard let first, first.at <= start else { return total }
-        return max(0, total - first.seconds)
+        // Until the app has a total from before the window, it counts what was played since its first one (0 on a first sync):
+        // an undercount, never the whole total. Exact 14 days after the first sync.
+        return max(0, total - (first?.seconds ?? total))
     }
 }

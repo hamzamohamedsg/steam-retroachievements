@@ -27,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { AppModel.shared.launch() }
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppModel.shared.quitting() }
+    }
 }
 
 struct MenuContent: View {
@@ -47,6 +51,7 @@ struct MenuContent: View {
         }
         Divider()
         Button("Quit Steam RetroAchievements") { NSApp.terminate(nil) }
+        Button("Quit and Close Steam's Debug Port") { model.quitting(closePort: true); NSApp.terminate(nil) }
     }
 
     /// The dialogs live in Steam's library window.
