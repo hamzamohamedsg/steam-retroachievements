@@ -152,18 +152,24 @@
     return out;
   });
 
-  // SteamGridDB art for new shortcuts. The app fetches it and only images come here. The first error (rate limit, no network) ends the run.
+  // SteamGridDB art for new shortcuts. The app fetches it and only images come here. One game failing doesn't stop the others;
+  // a rate limit, rejected key or no network (which every game would hit too) ends the run.
+  const applyArt = async (appid, art) => {
+    await Promise.all(art.images.map((i) => SteamClient.Apps.SetCustomArtworkForApp(appid, i.data, i.ext, i.assetType)));
+    if (art.iconPath) SteamClient.Apps.SetShortcutIcon(appid, art.iconPath);
+  };
   const addArtwork = safe(async (added) => {
     // 3 games at a time, each fetching its 5 kinds at once: fast without tripping SteamGridDB's rate limit.
     const queue = [...added];
-    let failed = false;
+    let stop = false;
     const worker = async () => {
-      for (let g; !failed && (g = queue.shift());) {
+      for (let g; !stop && (g = queue.shift());) {
         try {
-          const art = await call("artwork", { title: g.name, appid: g.appid }, 120000);
-          await Promise.all(art.images.map((i) => SteamClient.Apps.SetCustomArtworkForApp(g.appid, i.data, i.ext, i.assetType)));
-          if (art.iconPath) SteamClient.Apps.SetShortcutIcon(g.appid, art.iconPath);
-        } catch (e) { failed = true; throw e; }
+          await applyArt(g.appid, await call("artwork", { title: g.name, appid: g.appid }, 120000));
+        } catch (e) {
+          log("error", `artwork for ${g.name}: ${e?.message ?? e}`);
+          if (/network|http\((401|403|429|5\d\d)\)|timed out/.test(String(e?.message ?? e))) stop = true;
+        }
       }
     };
     await Promise.all([worker(), worker(), worker()]);
@@ -228,6 +234,25 @@
   .sra-menu[data-sra] { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.7); }
   .sra-missable { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 2px; background: rgba(229, 181, 13, 0.18); color: #e5b50d; font-size: 11px; line-height: 16px; }
   :has(> .sra-missable-mark) { position: relative; }
+  .sra-dialog.sra-art-dialog { width: min(960px, 94vw); height: 80vh; }
+  .sra-art-dialog .sra-dialog-body { flex: 1; min-height: 0; }
+  .sra-art-tag { margin-left: 8px; padding: 0 5px; border-radius: 2px; background: rgba(26, 159, 255, 0.2); color: #67c1f5; font-size: 11px; line-height: 16px; }
+  .sra-art-tabs { display: flex; gap: 6px; align-items: center; margin: 8px 0 12px; }
+  .sra-art-tabs .sra-link { margin-left: auto; }
+  .sra-art-tab { background: rgba(255, 255, 255, 0.08); color: #c6d4df; border: 0; border-radius: 2px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .sra-art-tab:hover { background: rgba(255, 255, 255, 0.16); } .sra-art-tab.sra-art-on { background: #1a9fff; color: #fff; }
+  .sra-art-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(var(--w, 150px), 1fr)); align-items: start; }
+  .sra-art-grid > .sra-muted { grid-column: 1 / -1; }
+  .sra-art-k-grid { --w: 140px; } .sra-art-k-wide { --w: 300px; } .sra-art-k-hero { --w: 300px; } .sra-art-k-logo { --w: 200px; } .sra-art-k-icon { --w: 96px; }
+  .sra-art-thumb { position: relative; cursor: pointer; border-radius: 2px; background: #0e141b; outline: 2px solid transparent; outline-offset: -2px; overflow: hidden; }
+  .sra-art-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .sra-art-k-grid .sra-art-thumb { aspect-ratio: 2 / 3; } .sra-art-k-wide .sra-art-thumb { aspect-ratio: 460 / 215; } .sra-art-k-hero .sra-art-thumb { aspect-ratio: 96 / 31; }
+  .sra-art-k-logo .sra-art-thumb { aspect-ratio: 2 / 1; } .sra-art-k-icon .sra-art-thumb { aspect-ratio: 1; }
+  .sra-art-k-logo .sra-art-thumb, .sra-art-k-icon .sra-art-thumb { background: conic-gradient(#1c1c1c 25%, #2a2a2a 0 50%, #1c1c1c 0 75%, #2a2a2a 0) 0 0 / 16px 16px; }
+  .sra-art-k-logo .sra-art-thumb img, .sra-art-k-icon .sra-art-thumb img { object-fit: contain; }
+  .sra-art-thumb:hover { outline-color: rgba(26, 159, 255, 0.6); } .sra-art-thumb.sra-art-on { outline-color: #1a9fff; }
+  .sra-art-check { display: none; position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 50%; background: #1a9fff; color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+  .sra-art-thumb.sra-art-on .sra-art-check { display: block; }
   .sra-missable-mark { position: absolute; top: 0; right: 0; width: 14px; height: 14px; border-radius: 0 0 0 3px; background: #e5b50d; color: #000; font-size: 11px; font-weight: 700; line-height: 14px; text-align: center; }
   `;
 
@@ -480,7 +505,8 @@
         p.notice && el(doc, "div", { class: "sra-notice" }, p.notice),
         el(doc, "div", { class: "sra-actions" },
           el(doc, "button", { class: "sra-link", onclick: () => call("openURL", { url: g.raURL }) }, "View on RetroAchievements"),
-          el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?")),
+          el(doc, "button", { class: "sra-link", onclick: () => openChooser(p.consoleId) }, "Wrong game?"),
+          !current.bpm && el(doc, "button", { class: "sra-link", onclick: () => openArtwork(current.appid, appStore.GetAppOverviewByAppID(current.appid)?.display_name) }, "Choose artwork")),
         p.updatedText && el(doc, "div", { class: "sra-muted" }, p.updatedText)),
       el(doc, "div", { class: c(N, "Stats", "SectionContainer") }, g.details.map((d) => row(d.label, d.value)), p.summary && row("Points", pointsText(p))))));
     const buttons = bars.map((bar) => {
@@ -507,7 +533,8 @@
     el(doc, "div", { class: c(K.details(), "Body") + " sra-message" },
       el(doc, "div", {}, current?.bpm && (p.state === "signedOut" || p.state === "notMatched") ? `${p.message} Do this on the desktop library page.` : p.message),
       !current?.bpm && p.state === "signedOut" && el(doc, "button", { class: steamButton, onclick: () => openSettings() }, "Sign In"),
-      !current?.bpm && p.state === "notMatched" && el(doc, "button", { class: steamButton, onclick: () => openChooser(p.consoleId) }, "Choose game")));
+      !current?.bpm && p.state === "notMatched" && el(doc, "button", { class: steamButton, onclick: () => openChooser(p.consoleId) }, "Choose game"),
+      !current?.bpm && el(doc, "button", { class: "sra-link", onclick: () => openArtwork(current.appid, appStore.GetAppOverviewByAppID(current.appid)?.display_name) }, "Choose artwork")));
 
   const render = (payload) => {
     const doc = steamUI.doc();
@@ -687,6 +714,77 @@
     input.focus();
     search();
   };
+
+  // "Choose artwork": pick the SteamGridDB game, then the exact images; each click applies at once (Steam asset types: 0 cover, 3 wide, 1 hero, 2 logo).
+  const ART_KINDS = [["grid", "Cover"], ["wide", "Wide Cover"], ["hero", "Hero"], ["logo", "Logo"], ["icon", "Icon"]];
+  const openArtwork = safe(async (appid, name) => {
+    const doc = steamUI.doc();
+    if (!doc) return;
+    const input = el(doc, "input", { class: "sra-input", type: "search", placeholder: "Search SteamGridDB", value: name ?? "", spellcheck: "false" });
+    const body = el(doc, "div", { class: "sra-dialog-body" });
+    const status = el(doc, "div", { class: "sra-muted" });
+    const useAll = el(doc, "button", { class: "sra-btn", style: "display: none" }, "Use All Best");
+    let seq = 0, gameId = null, kind = "grid", applied = {};
+    const say = (text, bad) => { status.className = bad ? "sra-error" : "sra-muted"; status.textContent = text; };
+    const fail = (what, e) => { log("error", `${what}: ${e?.message ?? e}`); say(`${what} failed (${e?.message ?? e}). Try again.`, true); };
+
+    const showGames = async () => {
+      const mine = ++seq;
+      gameId = null;
+      useAll.style.display = "none";
+      body.replaceChildren(el(doc, "div", { class: "sra-muted" }, "Searching…"));
+      let hits;
+      try { hits = await call("artworkSearch", { query: input.value }, 30000); } catch (e) { fail("Search", e); body.replaceChildren(); return; }
+      if (mine !== seq) return;
+      say("");
+      body.replaceChildren(...(hits.length ? hits : [null]).map((g) => !g ? el(doc, "div", { class: "sra-muted" }, "No games found.")
+        : el(doc, "div", { class: "sra-row sra-pick", onclick: () => { gameId = g.id; applied = {}; useAll.style.display = ""; showOptions(); } },
+          el(doc, "div", { class: "sra-row-main" }, el(doc, "span", { class: "sra-row-title" }, g.name), g.verified && el(doc, "span", { class: "sra-art-tag" }, "Verified")),
+          el(doc, "div", { class: "sra-row-side" }, g.year ? String(g.year) : ""))));
+    };
+
+    const showOptions = async () => {
+      const mine = ++seq, k = kind;
+      const grid = el(doc, "div", { class: `sra-art-grid sra-art-k-${k}` }, el(doc, "div", { class: "sra-muted" }, "Loading…"));
+      body.replaceChildren(el(doc, "div", { class: "sra-art-tabs" },
+        ART_KINDS.map(([id, label]) => el(doc, "button", { class: "sra-art-tab" + (id === k ? " sra-art-on" : ""), onclick: () => { kind = id; showOptions(); } }, label)),
+        el(doc, "button", { class: "sra-link", onclick: () => showGames() }, "Other games")), grid);
+      let options;
+      try { options = await call("artworkOptions", { gameId, kind: k }, 30000); } catch (e) { fail("Loading images", e); grid.replaceChildren(); return; }
+      if (mine !== seq) return;
+      grid.replaceChildren(...(options.length ? options : [null]).map((o) => !o ? el(doc, "div", { class: "sra-muted" }, "No images for this game.") : el(doc, "div", {
+        class: "sra-art-thumb" + (applied[k] === o.url ? " sra-art-on" : ""),
+        title: [o.style, o.width && `${o.width}x${o.height}`, o.author && `by ${o.author}`].filter(Boolean).join(" · "),
+        onclick: async (e) => {
+          const tile = e.currentTarget;
+          say("Applying…");
+          try {
+            const r = await call("applyArtwork", { appid, kind: k, url: o.url }, 60000);
+            await applyArt(appid, { images: r.image ? [r.image] : [], iconPath: r.iconPath });
+            applied[k] = o.url;
+            for (const t of tile.parentNode?.children ?? []) t.classList.toggle("sra-art-on", t === tile);
+            say("Applied");
+          } catch (err) { fail("Applying", err); }
+        } }, el(doc, "img", { src: o.thumb, loading: "lazy", alt: "" }), el(doc, "span", { class: "sra-art-check" }, "✓"))));
+    };
+
+    useAll.addEventListener("click", safe(async () => {
+      useAll.disabled = true;
+      say("Applying…");
+      try {
+        await applyArt(appid, await call("autoArtwork", { appid, gameId }, 120000));
+        applied = {};
+        say("Applied the best of each kind");
+      } catch (e) { fail("Applying", e); }
+      useAll.disabled = false;
+    }));
+    const go = el(doc, "button", { class: "sra-btn", onclick: () => showGames() }, "Search");
+    input.addEventListener("keydown", safe((e) => { if (e.key === "Enter") showGames(); }));
+    const node = overlay(doc, "Choose artwork", el(doc, "div", { class: "sra-search" }, input, go), body, el(doc, "div", { class: "sra-footer" }, status, useAll));
+    node.firstElementChild.classList.add("sra-art-dialog");
+    input.focus();
+    if (input.value) showGames();
+  });
 
   // ---------------------------------------------------------------- settings and add games (desktop library only)
   // Opened from outside (the Mac menu, first run) through pendingOpen, so tick() has settled the page and won't close them.

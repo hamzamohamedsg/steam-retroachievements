@@ -115,6 +115,11 @@ public final class BridgeHandler: BridgeHandling {
     struct Unlock: Encodable { var id: Int; var title, description, image: String; var date: Int }
     struct ArtworkParams: Decodable { var title: String; var appid: UInt32 }
     struct ArtworkResult: Encodable { var images: [ArtworkImage]; var iconPath: String? }
+    struct ArtworkSearchParams: Decodable { var query: String }
+    struct ArtworkOptionsParams: Decodable { var gameId: Int; var kind: String }
+    struct ApplyArtworkParams: Decodable { var appid: UInt32; var kind, url: String }
+    struct ApplyArtworkResult: Encodable { var image: ArtworkImage?; var iconPath: String? }
+    struct AutoArtworkParams: Decodable { var appid: UInt32; var title: String?; var gameId: Int? }
     struct DiagnosticsParams: Decodable { var steamBuild: Int? }
 
     public func handle(method: String, params: Data) async throws -> Data {
@@ -189,6 +194,20 @@ public final class BridgeHandler: BridgeHandling {
         case "artwork":
             let p = try d.decode(ArtworkParams.self, from: params)
             let art = try await artwork.art(title: p.title)
+            return try encode(ArtworkResult(images: art.images, iconPath: art.icon.flatMap { saveIcon($0, appid: p.appid) }))
+        case "artworkSearch":
+            return try encode(try await artwork.search(try d.decode(ArtworkSearchParams.self, from: params).query))
+        case "artworkOptions":
+            let p = try d.decode(ArtworkOptionsParams.self, from: params)
+            return try encode(try await artwork.options(gameId: p.gameId, kind: p.kind))
+        case "applyArtwork":
+            let p = try d.decode(ApplyArtworkParams.self, from: params)
+            let r = try await artwork.fetch(kind: p.kind, url: p.url)
+            return try encode(ApplyArtworkResult(image: r.image, iconPath: r.icon.flatMap { saveIcon($0, appid: p.appid) }))
+        case "autoArtwork":
+            let p = try d.decode(AutoArtworkParams.self, from: params)
+            let art: (images: [ArtworkImage], icon: Data?)
+            if let id = p.gameId { art = try await artwork.art(gameId: id) } else if let title = p.title { art = try await artwork.art(title: title) } else { art = ([], nil) }
             return try encode(ArtworkResult(images: art.images, iconPath: art.icon.flatMap { saveIcon($0, appid: p.appid) }))
         case "openLog":
             await actions.openLog()
