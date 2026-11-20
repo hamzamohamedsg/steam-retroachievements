@@ -82,7 +82,7 @@ public final class RAClient: RAProviding {
         try decode([RAUnlock].self, try await request("API_GetUserRecentAchievements.php", ["u": credentials.username, "m": "\(minutes)"]))
     }
 
-    private func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
+    func request(_ endpoint: String, _ params: [String: String]) async throws -> Data {
         let url = Self.url(base: "https://retroachievements.org/API/\(endpoint)", params: params.merging(["y": credentials.apiKey]) { $1 })
         // URLError descriptions include the request URL, and with it the API key: never let them escape.
         let data: Data, status: Int

@@ -5,10 +5,12 @@ public struct Services: Sendable {
     public let ra: CachedRA
     public let matcher: Matcher
     public let playtimeHistory: PlaytimeHistory
+    /// Leaderboards go to RA directly, falling back to `ra`'s cache.
+    let client: RAClient
 
     public init(credentials: RACredentials, dataDirectory: URL, transport: HTTPTransport = URLSessionTransport()) {
-        ra = CachedRA(client: RAClient(credentials: credentials, transport: transport),
-                      cache: DiskCache(directory: dataDirectory.appendingPathComponent("cache")))
+        client = RAClient(credentials: credentials, transport: transport)
+        ra = CachedRA(client: client, cache: DiskCache(directory: dataDirectory.appendingPathComponent("cache")))
         matcher = Matcher(ra: ra, hasher: RomHasher(), store: MatchStore(file: dataDirectory.appendingPathComponent("matches.json")))
         playtimeHistory = PlaytimeHistory(file: dataDirectory.appendingPathComponent("playtime.json"))
     }
@@ -121,6 +123,9 @@ public final class BridgeHandler: BridgeHandling {
     struct ApplyArtworkResult: Encodable { var image: ArtworkImage?; var iconPath: String? }
     struct AutoArtworkParams: Decodable { var appid: UInt32; var title: String?; var gameId: Int? }
     struct DiagnosticsParams: Decodable { var steamBuild: Int? }
+    struct LeaderboardsParams: Decodable { var gameIds: [Int]; var fresh: Bool? }
+    struct EntriesParams: Decodable { var id: Int; var offset: Int; var count: Int }
+    struct BestsParams: Decodable { var gameIds: [Int]; var since: Double }
 
     public func handle(method: String, params: Data) async throws -> Data {
         let d = JSONDecoder()
@@ -195,6 +200,24 @@ public final class BridgeHandler: BridgeHandling {
             let p = try d.decode(ArtworkParams.self, from: params)
             let art = try await artwork.art(title: p.title)
             return try encode(ArtworkResult(images: art.images, iconPath: art.icon.flatMap { saveIcon($0, appid: p.appid) }))
+        case "leaderboards":
+            let p = try d.decode(LeaderboardsParams.self, from: params)
+            guard let s = await services() else { return try encode([LeaderboardSet]()) }
+            // The game's own boards, then each subset's; a subset RA can't answer for is left out rather than failing the rest.
+            var sets: [LeaderboardSet] = []
+            for (i, id) in p.gameIds.prefix(20).enumerated() {
+                do { sets.append(try await s.leaderboards(gameId: id, fresh: p.fresh ?? false)) } catch { if i == 0 { throw error } }
+            }
+            return try encode(sets)
+        case "leaderboardEntries":
+            let p = try d.decode(EntriesParams.self, from: params)
+            guard let s = await services() else { return try encode(LeaderboardEntriesPage(total: 0, entries: [])) }
+            return try encode(try await s.leaderboardEntries(id: p.id, offset: p.offset, count: p.count))
+        case "leaderboardBests":
+            let p = try d.decode(BestsParams.self, from: params)
+            guard let s = await services() else { return try encode([LeaderboardBest]()) }
+            // A minute before `since` allows for clock drift, as with unlocks.
+            return try encode(try await s.leaderboardBests(gameIds: Array(p.gameIds.prefix(20)), since: Date(timeIntervalSince1970: p.since - 60)))
         case "artworkSearch":
             return try encode(try await artwork.search(try d.decode(ArtworkSearchParams.self, from: params).query))
         case "artworkOptions":
