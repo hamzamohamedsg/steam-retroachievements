@@ -39,6 +39,8 @@ public struct BridgeActions: Sendable {
     /// Copy Diagnostics only: whether signed in, and what to scrub.
     public var credentials: @Sendable () async -> RACredentials?
     public var steamState: @Sendable () async -> String
+    /// A folder the user picked in the system's dialog, nil if they cancelled or there is none.
+    public var chooseFolder: @Sendable () async -> String?
 
     public init(openURL: @escaping @Sendable (URL) async -> Void = { _ in }, log: @escaping @Sendable (String, String) -> Void = { _, _ in },
                 account: @escaping @Sendable () async -> (username: String?, openAtLogin: Bool) = { (nil, false) },
@@ -48,10 +50,11 @@ public struct BridgeActions: Sendable {
                 uninstall: @escaping @Sendable () async -> Void = {},
                 updateVersion: @escaping @Sendable () async -> String? = { nil }, installUpdate: @escaping @Sendable () async -> String? = { nil },
                 openLog: @escaping @Sendable () async -> Void = {}, credentials: @escaping @Sendable () async -> RACredentials? = { nil },
-                steamState: @escaping @Sendable () async -> String = { "" }) {
+                steamState: @escaping @Sendable () async -> String = { "" }, chooseFolder: @escaping @Sendable () async -> String? = { nil }) {
         self.openURL = openURL; self.log = log; self.account = account; self.signIn = signIn; self.signOut = signOut
         self.setOpenAtLogin = setOpenAtLogin; self.keepDebugPort = keepDebugPort; self.setKeepDebugPort = setKeepDebugPort; self.uninstall = uninstall; self.updateVersion = updateVersion; self.installUpdate = installUpdate
         self.openLog = openLog; self.credentials = credentials; self.steamState = steamState
+        self.chooseFolder = chooseFolder
     }
 }
 
@@ -64,7 +67,7 @@ public final class BridgeHandler: BridgeHandling {
     let push: @Sendable (String) async -> Void
     let installed: @Sendable () -> Installed
     let hasher: any Fingerprinting
-    /// Holds the folder Add Games scanned last, so the next scan starts there.
+    /// The ROM folders the user added, as a JSON array of paths (older versions saved one plain path).
     let folderFile: URL?
     let artwork: SteamGridDB
     let logFile: URL?
@@ -91,7 +94,7 @@ public final class BridgeHandler: BridgeHandling {
     struct SettingsResult: Encodable { var username: String?; var openAtLogin, keepDebugPort: Bool; var emulators: [EmulatorStatus]; var updateVersion: String? }
     struct ShortcutLine: Decodable { var exe, launchOptions: String }
     /// Override keys are a folder path and a console id (as text: JSON object keys).
-    struct ScanParams: Decodable { var folder: String?; var shortcuts: [ShortcutLine]; var consoleOverrides: [String: Int]; var emulatorOverrides: [String: Emulator] }
+    struct ScanParams: Decodable { var folders: [String]?; var folder: String?; var shortcuts: [ShortcutLine]; var consoleOverrides: [String: Int]; var emulatorOverrides: [String: Emulator] }
     struct Choice: Encodable { var id, name: String }
     struct ScanRow: Encodable {
         var id, title, folder, status, statusText: String
@@ -99,7 +102,10 @@ public final class BridgeHandler: BridgeHandling {
         var emulatorChoices: [Choice]
         var shortcut: ShortcutSpec?
     }
-    struct ScanResult: Encodable { var folder: String; var items: [ScanRow] }
+    struct FolderRow: Encodable { var path: String; var missing: Bool }
+    struct ScanResult: Encodable { var folders: [FolderRow]; var items: [ScanRow] }
+    struct PathParams: Decodable { var path: String }
+    struct PathResult: Encodable { var path: String? }
     struct PlaytimeParams: Decodable { var shortcuts: [ShortcutInfo] }
     /// Steam's own units: whole minutes, and a Unix time. `unlocked`/`total`: the main set, for Steam's library tiles.
     /// `failed`: RA couldn't answer for it this time, so Steam keeps what it shows; absent otherwise.
@@ -159,6 +165,14 @@ public final class BridgeHandler: BridgeHandling {
             return try encode(SignInResult(error: await actions.installUpdate()))
         case "scanGames":
             return try encode(scan(try d.decode(ScanParams.self, from: params)))
+        case "chooseFolder":
+            return try encode(PathResult(path: await actions.chooseFolder()))
+        case "addRomFolder":
+            return try encode(SignInResult(error: addRomFolder(try d.decode(PathParams.self, from: params).path)))
+        case "removeRomFolder":
+            let path = Self.folderPath(try d.decode(PathParams.self, from: params).path)
+            saveFolders(savedFolders().filter { $0 != path })
+            return Data("null".utf8)
         case "playtimes":
             let p = try d.decode(PlaytimeParams.self, from: params)
             guard let s = await services() else { return try encode([Playtime]()) }
@@ -219,22 +233,51 @@ public final class BridgeHandler: BridgeHandling {
         return (try? data.write(to: file, options: .atomic)) == nil ? nil : file.path
     }
 
+    private static func isFolder(_ path: String) -> Bool {
+        var dir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue
+    }
+
+    private static func folderPath(_ path: String) -> String { URL(fileURLWithPath: (path as NSString).expandingTildeInPath).path }
+
+    /// Folders that are gone (an SD card taken out) stay in the list so they work again when it's back.
+    private func savedFolders() -> [String] {
+        guard let data = folderFile.flatMap({ try? Data(contentsOf: $0) }) else { return [] }
+        if let list = try? JSONDecoder().decode([String].self, from: data) { return list }
+        let old = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return old.isEmpty ? [] : [old]
+    }
+
+    private func saveFolders(_ folders: [String]) {
+        guard let folderFile else { return }
+        try? FileManager.default.createDirectory(at: folderFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(folders).write(to: folderFile, options: .atomic)
+    }
+
+    /// nil on success, otherwise the error to show.
+    private func addRomFolder(_ typed: String) -> String? {
+        let path = Self.folderPath(typed)
+        guard Self.isFolder(path) else { return "That isn't a folder that exists." }
+        // The first folder joins the default one rather than replacing it.
+        let saved = savedFolders().isEmpty ? [Scanner.defaultFolder().path] : savedFolders()
+        if !saved.contains(path) { saveFolders(saved + [path]) }
+        return nil
+    }
+
     private func scan(_ p: ScanParams) -> ScanResult {
         let installed = installed()
-        let isFolder = { (path: String) in var dir: ObjCBool = false; return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue }
-        let typed = p.folder.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-        // A remembered folder that's gone (an SD card taken out) falls back to the default.
-        let remembered = folderFile.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.flatMap { isFolder($0) ? URL(fileURLWithPath: $0) : nil }
-        let folder = typed ?? remembered ?? Scanner.defaultFolder()
-        if let folderFile, typed != nil, isFolder(folder.path) {
-            try? FileManager.default.createDirectory(at: folderFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? folder.path.write(to: folderFile, atomically: true, encoding: .utf8)
-        }
+        // Typed folders are a one-off; with nothing saved, the default folder is scanned.
+        let saved = savedFolders()
+        let paths = (p.folders ?? p.folder.map { [$0] } ?? (saved.isEmpty ? [Scanner.defaultFolder().path] : saved)).map(Self.folderPath)
+        let folders = paths.map { FolderRow(path: $0, missing: !Self.isFolder($0)) }
         let existing = Set(p.shortcuts.compactMap { EmulatorLaunch.parse(exe: $0.exe, launchOptions: $0.launchOptions)?.romPath })
         let emulatorOverrides = Dictionary(p.emulatorOverrides.compactMap { k, v in Int(k).map { ($0, v) } }) { a, _ in a }
-        let items = Scanner(installed: installed, hasher: hasher)
-            .scan(folder: folder, existingRomPaths: existing, consoleOverrides: p.consoleOverrides, emulatorOverrides: emulatorOverrides)
-        return ScanResult(folder: folder.path, items: items.map { item in
+        let scanner = Scanner(installed: installed, hasher: hasher)
+        var seen = Set<String>()
+        let items = folders.filter { !$0.missing }.flatMap {
+            scanner.scan(folder: URL(fileURLWithPath: $0.path), existingRomPaths: existing, consoleOverrides: p.consoleOverrides, emulatorOverrides: emulatorOverrides)
+        }.filter { seen.insert($0.romPath).inserted }
+        return ScanResult(folders: folders, items: items.map { item in
             let (status, text): (String, String) = switch item.status {
             case .ready: ("ready", "Ready")
             case .alreadyInSteam: ("alreadyInSteam", "Already in Steam")

@@ -196,6 +196,7 @@
   .sra-search { display: flex; gap: 8px; padding: 12px 16px 0; }
   .sra-search select, .sra-search input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
   .sra-search input { flex: 1; }
+  .sra-folders { padding: 0 16px; }
   .sra-btn:disabled, .sra-btn:disabled:hover { opacity: 0.5; cursor: default; background: rgba(255, 255, 255, 0.1); }
   .sra-btn.sra-danger:hover { background: #c4302b; }
   .sra-input { background: #0e141b; color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 2px; padding: 6px 8px; font: inherit; }
@@ -796,7 +797,8 @@
     ensureStyle(doc);
     const consoles = await call("consoles");
     const st = { items: [], included: new Set(), consoleOverrides: {}, emulatorOverrides: {}, busy: false, added: [] };
-    const folder = el(doc, "input", { class: "sra-input", placeholder: "ROM folder", spellcheck: "false", onkeydown: (e) => { if (e.key === "Enter") scan(); } });
+    const folder = el(doc, "input", { class: "sra-input", placeholder: "Add a folder: type a path", spellcheck: "false", onkeydown: (e) => { if (e.key === "Enter") addFolder(folder.value); } });
+    const folderList = el(doc, "div", { class: "sra-folders" });
     const list = el(doc, "div", { class: "sra-dialog-body" });
     const footer = el(doc, "div", { class: "sra-footer" });
     const chosen = () => st.items.filter((i) => i.status === "ready" && st.included.has(i.id));
@@ -822,18 +824,30 @@
         el(doc, "div", { class: "sra-row-main" }, el(doc, "div", { class: "sra-row-title" }, it.title), el(doc, "div", { class: "sra-muted" }, it.statusText)),
         consoleCell, emulatorCell);
     }));
+    const drawFolders = (folders) => folderList.replaceChildren(...folders.map((f) => el(doc, "div", { class: "sra-row" },
+      el(doc, "div", { class: "sra-row-main" }, f.path), f.missing ? el(doc, "div", { class: "sra-muted" }, "Not found") : "",
+      el(doc, "button", { class: "sra-link", onclick: () => removeFolder(f.path) }, "Remove"))));
+    const addFolder = safe(async (path) => {
+      path = path?.trim();
+      if (!path) return;
+      const r = await call("addRomFolder", { path });
+      if (!r.error) folder.value = "";
+      await scan(r.error ?? "");
+    });
+    const removeFolder = safe(async (path) => { await call("removeRomFolder", { path }); await scan(); });
+    const browse = safe(async () => { const r = await call("chooseFolder", {}, 600000); if (r.path) await addFolder(r.path); });
     // Hashing ROMs to tell consoles apart can take a while in a big folder.
     const scan = safe(async (message = "") => {
       st.busy = true;
       drawFooter("Scanning…");
       try {
-        const r = await call("scanGames", { folder: folder.value.trim() || null, shortcuts: [...await listShortcuts(), ...st.added],
+        const r = await call("scanGames", { shortcuts: [...await listShortcuts(), ...st.added],
           consoleOverrides: st.consoleOverrides, emulatorOverrides: st.emulatorOverrides }, 180000);
-        folder.value = r.folder;
+        drawFolders(r.folders);
         st.items = r.items;
         st.included = new Set(r.items.filter((i) => i.status === "ready").map((i) => i.id));
         drawList();
-        if (!message && !r.items.length) message = "No games found in this folder.";
+        if (!message && !r.items.length) message = "No games found in these folders.";
       } finally {
         st.busy = false;
         drawFooter(message);
@@ -850,7 +864,9 @@
       await scan([`Added ${results.length - errors.length} games to Steam.`, ...errors].join("\n"));
       addArtwork(results.filter((r) => !r.error));  // not awaited: art never holds up the add
     });
-    overlay(doc, "Add Games", el(doc, "div", { class: "sra-search" }, folder, el(doc, "button", { class: "sra-btn", onclick: () => scan() }, "Scan")), list, footer);
+    overlay(doc, "Add Games", folderList,
+      el(doc, "div", { class: "sra-search" }, folder, el(doc, "button", { class: "sra-btn", onclick: () => addFolder(folder.value) }, "Add"),
+        el(doc, "button", { class: "sra-btn", onclick: () => browse() }, "Browse…")), list, footer);
     scan();
   });
 

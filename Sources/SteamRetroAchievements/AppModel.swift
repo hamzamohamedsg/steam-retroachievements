@@ -48,7 +48,8 @@ import WinSDK
                 // Detached and off the main actor: xdg-open can hold on until the viewer closes.
                 openLog: { Task.detached { AppModel.open(AppPaths.log) } },
                 credentials: { await MainActor.run { AppModel.shared.credentials } },
-                steamState: { await MainActor.run { "\(AppModel.shared.steamState)" } }),
+                steamState: { await MainActor.run { "\(AppModel.shared.steamState)" } },
+                chooseFolder: { await AppModel.chooseFolder() }),
             push: { js in await AppModel.shared.run(js) },
             folderFile: AppPaths.data.appendingPathComponent("rom-folder.txt"), logFile: AppPaths.log))
         services = credentials.map { Services(credentials: $0, dataDirectory: AppPaths.data) }
@@ -267,6 +268,33 @@ import WinSDK
         runProcess("C:\\Windows\\System32\\rundll32.exe", ["url.dll,FileProtocolHandler", url.absoluteString])
         #else
         runProcess("/usr/bin/env", ["xdg-open", url.absoluteString])
+        #endif
+    }
+
+    /// The system's folder dialog; nil when cancelled. The Linux and Windows pickers haven't been run (written on a Mac).
+    nonisolated static func chooseFolder() async -> String? {
+        #if os(macOS)
+        // Asking from here also gets the app permission for Desktop, Documents and external drives.
+        return await MainActor.run {
+            NSApp.activate(ignoringOtherApps: true)
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            return panel.runModal() == .OK ? panel.url?.path : nil
+        }
+        #else
+        return await Task.detached {
+            #if os(Windows)
+            let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }"
+            let out = runProcess("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", ["-NoProfile", "-STA", "-Command", script])
+            #else
+            // KDE (Steam Deck desktop) has kdialog; 127 means env didn't find it. A cancel exits 1 with no output.
+            var out = runProcess("/usr/bin/env", ["kdialog", "--getexistingdirectory", NSHomeDirectory()])
+            if out.status == 127 || out.status == -1 { out = runProcess("/usr/bin/env", ["zenity", "--file-selection", "--directory"]) }
+            #endif
+            let path = out.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return out.status == 0 && !path.isEmpty ? path : nil
+        }.value
         #endif
     }
 

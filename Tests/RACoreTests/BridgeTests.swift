@@ -135,18 +135,66 @@ struct EchoHandler: BridgeHandling {
     #expect((items.first?["emulatorChoices"] as? [[String: Any]])?.map { $0["id"] as? String } == ["retroarch"])
 }
 
-@Test func scanGamesRemembersTheFolder() async throws {
-    let root = tempDir()
+private func folderBridge(file: URL) -> BridgeHandler {
+    BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, installed: { installed(cores: ["snes9x"]) },
+                  hasher: PathHasher(byFile: [:]), folderFile: file)
+}
+
+private func call(_ h: BridgeHandler, _ method: String, _ params: String) async throws -> [String: Any] {
+    (try JSONSerialization.jsonObject(with: try await h.handle(method: method, params: Data(params.utf8)), options: .fragmentsAllowed) as? [String: Any]) ?? [:]
+}
+
+private let scanRest = #""consoleOverrides":{},"emulatorOverrides":{},"shortcuts":[]"#
+
+@Test func scanGamesMergesSavedFoldersAndKeepsMissingOnes() async throws {
+    let a = tempDir(), b = tempDir()
+    touch(a, "snes/a.sfc")
+    touch(b, "snes/b.sfc")
+    let gone = b.appendingPathComponent("sd-card").path  // an SD card that's out
+    let file = tempDir().appendingPathComponent("rom-folder.txt")
+    let handler = folderBridge(file: file)
+    for path in [a.path, gone, b.path] { _ = try await call(handler, "addRomFolder", #"{"path":"\#(path)"}"#) }
+    #expect(try JSONDecoder().decode([String].self, from: Data(contentsOf: file)) == [Scanner.defaultFolder().path, a.path, b.path])  // joins the default; the missing one was refused as new
+    try #"["\#(a.path)","\#(gone)","\#(b.path)"]"#.write(to: file, atomically: true, encoding: .utf8)
+    let r = try await call(handler, "scanGames", "{\(scanRest)}")
+    #expect((r["folders"] as? [[String: Any]])?.map { $0["missing"] as? Bool } == [false, true, false])
+    #expect((r["items"] as? [[String: Any]])?.map { $0["title"] as? String } == ["a", "b"])
+    let twice = try await call(handler, "scanGames", #"{"folders":["\#(a.path)","\#(a.path)"],\#(scanRest)}"#)
+    #expect((twice["items"] as? [[String: Any]])?.count == 1)
+}
+
+@Test func oldSinglePathFileIsMigrated() async throws {
+    let root = tempDir(), other = tempDir()
     touch(root, "snes/a.sfc")
-    let inst = installed(cores: ["snes9x"])
-    let handler = BridgeHandler(services: { nil }, actions: BridgeActions(), push: { _ in }, installed: { inst }, hasher: PathHasher(byFile: [:]),
-                                folderFile: tempDir().appendingPathComponent("rom-folder.txt"))
-    func scannedFolder(_ folder: String) async throws -> String? {
-        let params = #"{"folder":\#(folder),"consoleOverrides":{},"emulatorOverrides":{},"shortcuts":[]}"#
-        return (try JSONSerialization.jsonObject(with: try await handler.handle(method: "scanGames", params: Data(params.utf8))) as? [String: Any])?["folder"] as? String
-    }
-    _ = try await scannedFolder("\"\(root.path)\"")
-    #expect(try await scannedFolder("null") == root.path)
+    let file = tempDir().appendingPathComponent("rom-folder.txt")
+    try root.path.write(to: file, atomically: true, encoding: .utf8)
+    let handler = folderBridge(file: file)
+    let r = try await call(handler, "scanGames", "{\(scanRest)}")
+    #expect((r["folders"] as? [[String: Any]])?.map { $0["path"] as? String } == [root.path])
+    #expect((r["items"] as? [[String: Any]])?.count == 1)
+    _ = try await call(handler, "addRomFolder", #"{"path":"\#(other.path)"}"#)
+    #expect(try JSONDecoder().decode([String].self, from: Data(contentsOf: file)) == [root.path, other.path])
+}
+
+@Test func addRomFolderRejectsWhatIsntAFolder() async throws {
+    let dir = tempDir()
+    touch(dir, "game.sfc")
+    let file = dir.appendingPathComponent("rom-folder.txt")
+    let handler = folderBridge(file: file)
+    #expect(try await call(handler, "addRomFolder", #"{"path":"\#(dir.path)/game.sfc"}"#)["error"] as? String != nil)
+    #expect(try await call(handler, "addRomFolder", #"{"path":"\#(dir.path)/nope"}"#)["error"] as? String != nil)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+}
+
+@Test func removingEveryFolderFallsBackToTheDefault() async throws {
+    let root = tempDir()
+    let handler = folderBridge(file: tempDir().appendingPathComponent("rom-folder.txt"))
+    _ = try await call(handler, "addRomFolder", #"{"path":"\#(root.path)"}"#)
+    #expect((try await call(handler, "scanGames", "{\(scanRest)}")["folders"] as? [[String: Any]])?.map { $0["path"] as? String } == [Scanner.defaultFolder().path, root.path])
+    _ = try await handler.handle(method: "removeRomFolder", params: Data(#"{"path":"\#(Scanner.defaultFolder().path)"}"#.utf8))
+    _ = try await handler.handle(method: "removeRomFolder", params: Data(#"{"path":"\#(root.path)"}"#.utf8))
+    let folders = try await call(handler, "scanGames", "{\(scanRest)}")["folders"] as? [[String: Any]]
+    #expect(folders?.map { $0["path"] as? String } == [Scanner.defaultFolder().path])
 }
 
 @Test func subsetsComeAlongAsOwnPanels() async throws {
